@@ -1,7 +1,7 @@
 import Foundation
 
 final class CookieManager {
-    private var cookieJar: CookieJar
+    private(set) var cookieJar: CookieJar
     private let storage: CookieStorage
     
     init(storage: CookieStorage) {

@@ -14,11 +14,14 @@ struct AppContainer: View {
     @State private var isSending = false
     @State private var hasLoadedHistory = false
     @State private var statusMessage: String?
+    @State private var showingCookiesEditor = false
+    @State private var cookieJar = CookieJar()
     private let workspaceBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
 
     private let templateRenderer = TemplateRenderer()
     private let httpClient = HTTPClient()
     private let historyPersistence: HistoryPersistence
+    private let cookieManager: CookieManager
 
     init() {
         let initialProject = RequestProject(name: "默认项目")
@@ -28,6 +31,11 @@ struct AppContainer: View {
         _requests = State(initialValue: [initialRequest])
         _openedRequestIDs = State(initialValue: [initialRequest.id])
         _selectedRequestID = State(initialValue: initialRequest.id)
+
+        let storage = CookieStorage()
+        let manager = CookieManager(storage: storage)
+        self.cookieManager = manager
+        _cookieJar = State(initialValue: manager.cookieJar)
 
         do {
             let mysqlDatabase = try MySQLDatabase()
@@ -286,11 +294,34 @@ struct AppContainer: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(isSending || selectedRequestBinding == nil)
+
+            Divider()
+                .frame(height: 28)
+
+            Button("Cookies") {
+                showingCookiesEditor = true
+            }
+            .frame(height: 50)
+            .font(.system(size: 14, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(workspaceBackground)
+        .sheet(isPresented: $showingCookiesEditor) {
+            CookiesEditorView(
+                cookieJar: $cookieJar,
+                onImport: { data in
+                    try? cookieManager.importCookies(from: data)
+                    cookieJar = cookieManager.cookieJar
+                },
+                onExport: {
+                    try? cookieManager.exportCookies()
+                }
+            )
+        }
     }
 
     private var selectedRequestIndex: Int? {

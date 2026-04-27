@@ -11,10 +11,12 @@ struct HTTPCookie: Identifiable, Equatable, Codable {
     var isHTTPOnly: Bool
     var sameSite: SameSitePolicy
     
-    enum SameSitePolicy: String, Codable, CaseIterable {
+    enum SameSitePolicy: String, Codable, CaseIterable, Identifiable {
         case lax = "Lax"
         case strict = "Strict"
         case none = "None"
+
+        var id: String { rawValue }
     }
     
     init(
