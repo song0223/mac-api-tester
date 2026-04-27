@@ -15,8 +15,16 @@ let package = Package(
         ),
     ],
     targets: [
+        .systemLibrary(
+            name: "CMySQL",
+            pkgConfig: "mysqlclient",
+            providers: [
+                .brew(["mysql@8.0", "mysql-client"]),
+            ]
+        ),
         .executableTarget(
             name: "MacAPITester",
+            dependencies: ["CMySQL"],
             path: "Sources/MacAPITester",
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
