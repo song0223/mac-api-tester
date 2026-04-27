@@ -197,6 +197,68 @@ final class HistoryRepository {
     }
 }
 
+struct MySQLCollectionRecord: Equatable {
+    let id: String
+    let name: String
+    let payload: String
+}
+
+class MySQLRepository {
+    let database: MySQLDatabase
+
+    init(database: MySQLDatabase) throws {
+        self.database = database
+    }
+}
+
+final class MySQLCollectionRepository: MySQLRepository {
+    override init(database: MySQLDatabase) throws {
+        try super.init(database: database)
+        try database.execute("""
+        CREATE TABLE IF NOT EXISTS collections (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            payload TEXT NOT NULL
+        )
+        """)
+    }
+
+    func createCollection(name: String, payload: String) throws -> String {
+        let id = UUID().uuidString
+        try database.execute(
+            "INSERT INTO collections (id, name, payload) VALUES (?, ?, ?)",
+            parameters: [.string(id), .string(name), .string(payload)]
+        )
+        return id
+    }
+
+    func fetchCollections() throws -> [MySQLCollectionRecord] {
+        let rows = try database.query("SELECT id, name, payload FROM collections ORDER BY name ASC")
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String,
+                  let name = row["name"] as? String,
+                  let payload = row["payload"] as? String else {
+                return nil
+            }
+            return MySQLCollectionRecord(id: id, name: name, payload: payload)
+        }
+    }
+
+    func updateCollection(id: String, name: String, payload: String) throws {
+        try database.execute(
+            "UPDATE collections SET name = ?, payload = ? WHERE id = ?",
+            parameters: [.string(name), .string(payload), .string(id)]
+        )
+    }
+
+    func deleteCollection(id: String) throws {
+        try database.execute(
+            "DELETE FROM collections WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+}
+
 final class MySQLHistoryRepository {
     private let database: MySQLDatabase
     private static let dateFormatter: DateFormatter = {
