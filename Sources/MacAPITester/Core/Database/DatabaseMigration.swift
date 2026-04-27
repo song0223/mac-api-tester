@@ -51,14 +51,15 @@ final class DatabaseMigration {
             CREATE TABLE IF NOT EXISTS request_history (
                 id VARCHAR(36) PRIMARY KEY,
                 request_id VARCHAR(36),
-                method VARCHAR(10) NOT NULL,
-                url TEXT NOT NULL,
+                method VARCHAR(10) NOT NULL DEFAULT '',
+                url TEXT,
                 status_code INT,
                 response_time_ms INT,
                 request_headers JSON,
                 request_body TEXT,
                 response_headers JSON,
                 response_body TEXT,
+                message TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (request_id) REFERENCES request_documents(id) ON DELETE SET NULL
             )
@@ -126,21 +127,28 @@ final class DatabaseMigration {
         let columns = [
             "id", "request_id", "method", "url", "status_code",
             "response_time_ms", "request_headers", "request_body",
-            "response_headers", "response_body", "created_at",
+            "response_headers", "response_body", "message", "created_at",
         ]
         var batch: [[MySQLValue]] = []
         for row in rows {
+            let method = row["method"] as? String ?? ""
+            let url = row["url"] as? String ?? ""
+            let statusCode = (row["status_code"] as? Int).map(String.init) ?? ""
+            let responseTime = (row["response_time_ms"] as? Int).map(String.init) ?? ""
+            let message = "\(method) \(url) -> \(statusCode) (\(responseTime) ms)"
+            
             let params: [MySQLValue] = [
                 .string(row["id"] as? String ?? ""),
                 nullableString(row["request_id"]),
-                .string(row["method"] as? String ?? ""),
-                .string(row["url"] as? String ?? ""),
+                .string(method),
+                .string(url),
                 nullableInt(row["status_code"]),
                 nullableInt(row["response_time_ms"]),
                 nullableString(row["request_headers"]),
                 nullableString(row["request_body"]),
                 nullableString(row["response_headers"]),
                 nullableString(row["response_body"]),
+                .string(message),
                 nullableString(row["created_at"]),
             ]
             batch.append(params)

@@ -199,38 +199,60 @@ final class HistoryRepository {
 
 final class MySQLHistoryRepository {
     private let database: MySQLDatabase
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
 
     init(database: MySQLDatabase) throws {
         self.database = database
         try database.execute("""
-        CREATE TABLE IF NOT EXISTS history (
+        CREATE TABLE IF NOT EXISTS request_history (
             id VARCHAR(36) PRIMARY KEY,
+            request_id VARCHAR(36),
+            method VARCHAR(10) NOT NULL DEFAULT '',
+            url TEXT,
+            status_code INT,
+            response_time_ms INT,
+            request_headers JSON,
+            request_body TEXT,
+            response_headers JSON,
+            response_body TEXT,
             message TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        
+        // Add message column if it doesn't exist (for existing tables)
+        do {
+            try database.execute("ALTER TABLE request_history ADD COLUMN message TEXT NOT NULL")
+        } catch {
+            // Column already exists, ignore error
+        }
     }
 
     func insertHistory(message: String, createdAt: Date) throws {
         let id = UUID().uuidString
         let timestamp = createdAt.timeIntervalSince1970
         try database.execute(
-            "INSERT INTO history (id, message, created_at) VALUES (?, ?, FROM_UNIXTIME(?))",
+            "INSERT INTO request_history (id, message, created_at) VALUES (?, ?, FROM_UNIXTIME(?))",
             parameters: [.string(id), .string(message), .double(timestamp)]
         )
 
         try database.execute("""
-        DELETE FROM history
+        DELETE FROM request_history
         WHERE id NOT IN (
             SELECT id FROM (
-                SELECT id FROM history ORDER BY created_at DESC LIMIT 300
+                SELECT id FROM request_history ORDER BY created_at DESC LIMIT 300
             ) AS recent
         )
         """)
     }
 
     func fetchHistory() throws -> [MySQLHistoryRecord] {
-        let rows = try database.query("SELECT id, message, created_at FROM history ORDER BY created_at ASC")
+        let rows = try database.query("SELECT id, message, created_at FROM request_history ORDER BY created_at ASC")
         return rows.compactMap { row in
             guard let id = row["id"] as? String,
                   let message = row["message"] as? String else {
@@ -239,10 +261,7 @@ final class MySQLHistoryRepository {
 
             let createdAt: Date
             if let dateString = row["created_at"] as? String {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                createdAt = formatter.date(from: dateString) ?? Date()
+                createdAt = Self.dateFormatter.date(from: dateString) ?? Date()
             } else {
                 createdAt = Date()
             }

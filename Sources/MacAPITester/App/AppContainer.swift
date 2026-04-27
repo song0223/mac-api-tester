@@ -37,6 +37,7 @@ struct AppContainer: View {
         } catch {
             print("MySQL初始化失败，使用内存存储: \(error)")
             self.historyPersistence = HistoryPersistence.inMemory
+            _statusMessage = State(initialValue: "⚠️ MySQL连接失败，使用临时内存存储（数据不会持久化）")
         }
     }
 
@@ -849,7 +850,12 @@ private final class HistoryPersistence {
 
     init(database: MySQLDatabase) {
         self.database = database
-        self.repository = try? MySQLHistoryRepository(database: database)
+        do {
+            self.repository = try MySQLHistoryRepository(database: database)
+        } catch {
+            print("HistoryRepository初始化失败: \(error)")
+            self.repository = nil
+        }
     }
 
     static var inMemory: HistoryPersistence {
@@ -858,7 +864,16 @@ private final class HistoryPersistence {
 
     private init(database: MySQLDatabase?) {
         self.database = database
-        self.repository = database.flatMap { try? MySQLHistoryRepository(database: $0) }
+        if let database {
+            do {
+                self.repository = try MySQLHistoryRepository(database: database)
+            } catch {
+                print("HistoryRepository初始化失败: \(error)")
+                self.repository = nil
+            }
+        } else {
+            self.repository = nil
+        }
     }
 
     func save(message: String, createdAt: Date) {
@@ -866,22 +881,31 @@ private final class HistoryPersistence {
             return
         }
 
-        try? repository.insertHistory(message: message, createdAt: createdAt)
+        do {
+            try repository.insertHistory(message: message, createdAt: createdAt)
+        } catch {
+            print("保存历史记录失败: \(error)")
+        }
     }
 
     func loadItems() -> [RequestHistoryItem] {
-        guard let repository,
-              let records = try? repository.fetchHistory() else {
+        guard let repository else {
             return []
         }
 
-        return records
-            .reversed()
-            .map { record in
-                RequestHistoryItem(
-                    timestamp: record.createdAt,
-                    message: record.message
-                )
-            }
+        do {
+            let records = try repository.fetchHistory()
+            return records
+                .reversed()
+                .map { record in
+                    RequestHistoryItem(
+                        timestamp: record.createdAt,
+                        message: record.message
+                    )
+                }
+        } catch {
+            print("加载历史记录失败: \(error)")
+            return []
+        }
     }
 }
