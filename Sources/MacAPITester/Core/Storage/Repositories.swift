@@ -259,8 +259,7 @@ final class MySQLCollectionRepository: MySQLRepository {
     }
 }
 
-final class MySQLHistoryRepository {
-    private let database: MySQLDatabase
+final class MySQLHistoryRepository: MySQLRepository {
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -268,8 +267,8 @@ final class MySQLHistoryRepository {
         return formatter
     }()
 
-    init(database: MySQLDatabase) throws {
-        self.database = database
+    override init(database: MySQLDatabase) throws {
+        try super.init(database: database)
         try database.execute("""
         CREATE TABLE IF NOT EXISTS request_history (
             id VARCHAR(36) PRIMARY KEY,
