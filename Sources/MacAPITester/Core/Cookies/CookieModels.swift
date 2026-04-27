@@ -54,7 +54,12 @@ struct HTTPCookie: Identifiable, Equatable, Codable {
             domainMatch = domain == self.domain
         }
         
-        let pathMatch = path == self.path || path.hasPrefix(self.path + "/")
+        let pathMatch: Bool
+        if self.path == "/" {
+            pathMatch = true
+        } else {
+            pathMatch = path == self.path || path.hasPrefix(self.path + "/")
+        }
         return domainMatch && pathMatch
     }
 }
