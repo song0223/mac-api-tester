@@ -45,8 +45,16 @@ struct HTTPCookie: Identifiable, Equatable, Codable {
     }
     
     func matches(domain: String, path: String) -> Bool {
-        let domainMatch = self.domain.hasSuffix(domain) || domain.hasSuffix(self.domain)
-        let pathMatch = path.hasPrefix(self.path)
+        let domainMatch: Bool
+        if self.domain.hasPrefix(".") {
+            // Domain starts with dot: matches base domain and subdomains
+            domainMatch = domain == String(self.domain.dropFirst()) || domain.hasSuffix(self.domain)
+        } else {
+            // No leading dot: exact match only
+            domainMatch = domain == self.domain
+        }
+        
+        let pathMatch = path == self.path || path.hasPrefix(self.path + "/")
         return domainMatch && pathMatch
     }
 }
