@@ -64,6 +64,23 @@ final class DatabaseMigration {
                 FOREIGN KEY (request_id) REFERENCES request_documents(id) ON DELETE SET NULL
             )
         """)
+
+        try mysqlDatabase.execute("""
+            CREATE TABLE IF NOT EXISTS cookies (
+                id VARCHAR(36) PRIMARY KEY,
+                domain VARCHAR(255) NOT NULL,
+                path VARCHAR(255) NOT NULL DEFAULT '/',
+                name VARCHAR(255) NOT NULL,
+                value TEXT NOT NULL,
+                expires_at VARCHAR(50),
+                is_secure TINYINT(1) NOT NULL DEFAULT 0,
+                is_http_only TINYINT(1) NOT NULL DEFAULT 0,
+                same_site VARCHAR(10) NOT NULL DEFAULT 'Lax',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_domain_path_name (domain, path, name)
+            )
+        """)
     }
 
     private func migrateDataFromSQLite(_ sqliteDatabase: SQLiteDatabase) throws {
