@@ -66,52 +66,122 @@ final class DatabaseMigration {
     }
 
     private func migrateDataFromSQLite(_ sqliteDatabase: SQLiteDatabase) throws {
-        let projects = try sqliteDatabase.query("SELECT * FROM projects")
-        for project in projects {
-            let id = project["id"] as? String ?? ""
-            let name = project["name"] as? String ?? ""
-            try mysqlDatabase.execute(
-                "INSERT INTO projects (id, name) VALUES (?, ?)",
-                parameters: [.string(id), .string(name)]
-            )
+        try mysqlDatabase.beginTransaction()
+        do {
+            try migrateProjects(sqliteDatabase)
+            try migrateRequestDocuments(sqliteDatabase)
+            try migrateRequestHistory(sqliteDatabase)
+            try mysqlDatabase.commit()
+        } catch {
+            try? mysqlDatabase.rollback()
+            throw error
         }
+    }
 
-        let requests = try sqliteDatabase.query("SELECT * FROM request_documents")
-        for request in requests {
-            let id = request["id"] as? String ?? ""
-            let projectId = request["project_id"] as? String ?? ""
-            let name = request["name"] as? String ?? ""
-            let method = request["method"] as? String ?? "GET"
-            let urlString = request["url_string"] as? String ?? ""
-            let queryText = request["query_text"] as? String ?? ""
-            let headersText = request["headers_text"] as? String ?? ""
-            let bodyText = request["body_text"] as? String ?? ""
-            let variablesText = request["variables_text"] as? String ?? ""
-            try mysqlDatabase.execute(
-                """
-                INSERT INTO request_documents (id, project_id, name, method, url_string, query_text, headers_text, body_text, variables_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                parameters: [.string(id), .string(projectId), .string(name), .string(method), .string(urlString), .string(queryText), .string(headersText), .string(bodyText), .string(variablesText)]
-            )
+    private func migrateProjects(_ sqliteDatabase: SQLiteDatabase) throws {
+        let rows = try sqliteDatabase.query("SELECT * FROM projects")
+        let columns = ["id", "name"]
+        var batch: [[MySQLValue]] = []
+        for row in rows {
+            let params: [MySQLValue] = [
+                .string(row["id"] as? String ?? ""),
+                .string(row["name"] as? String ?? ""),
+            ]
+            batch.append(params)
         }
+        try insertBatch(table: "projects", columns: columns, batch: batch)
+    }
 
-        let history = try sqliteDatabase.query("SELECT * FROM request_history")
-        for record in history {
-            let id = record["id"] as? String ?? ""
-            let requestId = record["request_id"] as? String ?? ""
-            let method = record["method"] as? String ?? ""
-            let url = record["url"] as? String ?? ""
-            let statusCode = record["status_code"] as? Int ?? 0
-            let responseTimeMs = record["response_time_ms"] as? Int ?? 0
-            let createdAt = record["created_at"] as? String ?? ""
-            try mysqlDatabase.execute(
+    private func migrateRequestDocuments(_ sqliteDatabase: SQLiteDatabase) throws {
+        let rows = try sqliteDatabase.query("SELECT * FROM request_documents")
+        let columns = [
+            "id", "project_id", "name", "api_status", "description",
+            "method", "url_string", "query_text", "headers_text",
+            "body_text", "variables_text", "auth_type", "auth_config",
+        ]
+        var batch: [[MySQLValue]] = []
+        for row in rows {
+            let params: [MySQLValue] = [
+                .string(row["id"] as? String ?? ""),
+                .string(row["project_id"] as? String ?? ""),
+                .string(row["name"] as? String ?? ""),
+                .string(row["api_status"] as? String ?? "接口状态"),
+                nullableString(row["description"]),
+                .string(row["method"] as? String ?? "GET"),
+                .string(row["url_string"] as? String ?? ""),
+                .string(row["query_text"] as? String ?? ""),
+                .string(row["headers_text"] as? String ?? ""),
+                .string(row["body_text"] as? String ?? ""),
+                .string(row["variables_text"] as? String ?? ""),
+                .string(row["auth_type"] as? String ?? "none"),
+                nullableString(row["auth_config"]),
+            ]
+            batch.append(params)
+        }
+        try insertBatch(table: "request_documents", columns: columns, batch: batch)
+    }
+
+    private func migrateRequestHistory(_ sqliteDatabase: SQLiteDatabase) throws {
+        let rows = try sqliteDatabase.query("SELECT * FROM request_history")
+        let columns = [
+            "id", "request_id", "method", "url", "status_code",
+            "response_time_ms", "request_headers", "request_body",
+            "response_headers", "response_body", "created_at",
+        ]
+        var batch: [[MySQLValue]] = []
+        for row in rows {
+            let params: [MySQLValue] = [
+                .string(row["id"] as? String ?? ""),
+                nullableString(row["request_id"]),
+                .string(row["method"] as? String ?? ""),
+                .string(row["url"] as? String ?? ""),
+                nullableInt(row["status_code"]),
+                nullableInt(row["response_time_ms"]),
+                nullableString(row["request_headers"]),
+                nullableString(row["request_body"]),
+                nullableString(row["response_headers"]),
+                nullableString(row["response_body"]),
+                nullableString(row["created_at"]),
+            ]
+            batch.append(params)
+        }
+        try insertBatch(table: "request_history", columns: columns, batch: batch)
+    }
+
+    private func nullableString(_ value: Any?) -> MySQLValue {
+        if let val = value as? String { return .string(val) }
+        if value is NSNull { return .null }
+        if value == nil { return .null }
+        return .string(String(describing: value!))
+    }
+
+    private func nullableInt(_ value: Any?) -> MySQLValue {
+        if let val = value as? Int { return .int(val) }
+        if let val = value as? Int64 { return .int(Int(val)) }
+        return .null
+    }
+
+    private static let batchSize = 500
+
+    private func insertBatch(table: String, columns: [String], batch: [[MySQLValue]]) throws {
+        let columnList = columns.joined(separator: ", ")
+        for chunkStart in stride(from: 0, to: batch.count, by: Self.batchSize) {
+            let chunkEnd = min(chunkStart + Self.batchSize, batch.count)
+            let chunk = Array(batch[chunkStart..<chunkEnd])
+
+            var valueClauses: [String] = []
+            var params: [MySQLValue] = []
+            for row in chunk {
+                let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+                valueClauses.append("(\(placeholders))")
+                params.append(contentsOf: row)
+            }
+
+            let sql = """
+                INSERT IGNORE INTO \(table) (\(columnList))
+                VALUES \(valueClauses.joined(separator: ", "))
                 """
-                INSERT INTO request_history (id, request_id, method, url, status_code, response_time_ms, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                parameters: [.string(id), .string(requestId), .string(method), .string(url), .int(statusCode), .int(responseTimeMs), .string(createdAt)]
-            )
+            try mysqlDatabase.execute(sql, parameters: params)
         }
     }
 }

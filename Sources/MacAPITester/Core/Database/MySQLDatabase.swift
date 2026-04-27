@@ -68,6 +68,7 @@ final class MySQLDatabase: @unchecked Sendable {
         }
 
         self.connection = conn
+        mysql_set_character_set(conn, "utf8mb4")
     }
 
     private func disconnect() {
@@ -151,8 +152,9 @@ final class MySQLDatabase: @unchecked Sendable {
                 switch value {
                 case .string(let str):
                     let escaped = str.withCString { ptr in
-                        let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: str.count * 2 + 1)
-                        mysql_real_escape_string(connection, buffer, ptr, UInt(str.count))
+                        let byteLength = str.utf8.count
+                        let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: byteLength * 2 + 1)
+                        mysql_real_escape_string(connection, buffer, ptr, UInt(byteLength))
                         let escapedStr = String(cString: buffer)
                         buffer.deallocate()
                         return escapedStr
