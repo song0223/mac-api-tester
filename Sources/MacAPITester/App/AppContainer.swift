@@ -15,7 +15,9 @@ struct AppContainer: View {
     @State private var hasLoadedHistory = false
     @State private var statusMessage: String?
     @State private var showingCookiesEditor = false
+    @State private var showingScriptEditor = false
     @State private var cookieJar = CookieJar()
+    @State private var scripts: [Script] = []
     private let workspaceBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
 
     private let templateRenderer = TemplateRenderer()
@@ -305,6 +307,14 @@ struct AppContainer: View {
             .font(.system(size: 14, weight: .medium))
             .buttonStyle(.bordered)
             .controlSize(.large)
+
+            Button("脚本") {
+                showingScriptEditor = true
+            }
+            .frame(height: 50)
+            .font(.system(size: 14, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
@@ -320,6 +330,12 @@ struct AppContainer: View {
                 onExport: {
                     try? cookieManager.exportCookies()
                 }
+            )
+        }
+        .sheet(isPresented: $showingScriptEditor) {
+            ScriptEditorView(
+                scripts: $scripts,
+                onRequestUpdate: { _ in }
             )
         }
     }
