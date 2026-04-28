@@ -36,87 +36,146 @@ final class HTMLRenderer {
         """
     }
     
-    /// Markdown 转 HTML（简化实现）
+    /// Markdown 转 HTML
     private func convertMarkdownToHTML(_ markdown: String) -> String {
-        var html = markdown
-        
-        // 标题
-        html = html.replacingOccurrences(of: "^# (.+)$", with: "<h1>$1</h1>", options: .regularExpression)
-        html = html.replacingOccurrences(of: "^## (.+)$", with: "<h2>$1</h2>", options: .regularExpression)
-        html = html.replacingOccurrences(of: "^### (.+)$", with: "<h3>$1</h3>", options: .regularExpression)
-        
-        // 粗体
-        html = html.replacingOccurrences(of: "\\*\\*(.+?)\\*\\*", with: "<strong>$1</strong>", options: .regularExpression)
-        
-        // 行内代码
-        html = html.replacingOccurrences(of: "`([^`]+)`", with: "<code>$1</code>", options: .regularExpression)
-        
-        // 代码块
-        html = html.replacingOccurrences(of: "```([^`]+)```", with: "<pre><code>$1</code></pre>", options: .regularExpression)
-        
-        // 表格
-        html = convertTables(html)
-        
-        // 列表
-        html = html.replacingOccurrences(of: "^- (.+)$", with: "<li>$1</li>", options: .regularExpression)
-        
-        // 分隔线
-        html = html.replacingOccurrences(of: "^---$", with: "<hr>", options: .regularExpression)
-        
-        // 引用
-        html = html.replacingOccurrences(of: "^> (.+)$", with: "<blockquote>$1</blockquote>", options: .regularExpression)
-        
-        // 段落
-        html = html.replacingOccurrences(of: "\n\n", with: "</p><p>")
-        html = "<p>" + html + "</p>"
-        
-        return html
-    }
-    
-    /// 转换表格
-    private func convertTables(_ html: String) -> String {
-        let lines = html.components(separatedBy: .newlines)
-        var result: [String] = []
+        let lines = markdown.components(separatedBy: .newlines)
+        var htmlLines: [String] = []
+        var inCodeBlock = false
+        var codeContent = ""
         var inTable = false
         var tableRows: [String] = []
-        
+        var inList = false
+        var listItems: [String] = []
+
         for line in lines {
-            if line.contains("|") && line.contains("---") {
-                // 表头分隔符，跳过
+            // Code block
+            if line.hasPrefix("```") {
+                if inCodeBlock {
+                    htmlLines.append("<pre><code>\(codeContent)</code></pre>")
+                    codeContent = ""
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                }
                 continue
-            } else if line.contains("|") {
+            }
+
+            if inCodeBlock {
+                codeContent += line + "\n"
+                continue
+            }
+
+            // Table
+            if line.contains("|") && line.contains("---") {
+                continue // Skip separator
+            }
+
+            if line.contains("|") && line.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
                 if !inTable {
                     inTable = true
                     tableRows = []
                 }
-                
+
                 let cells = line.split(separator: "|")
                     .map { String($0).trimmingCharacters(in: .whitespaces) }
-                
+                    .filter { !$0.isEmpty }
+
                 if tableRows.isEmpty {
-                    // 表头
                     let header = cells.map { "<th>\($0)</th>" }.joined()
-                    tableRows.append("<tr>\(header)</tr>")
+                    tableRows.append("<thead><tr>\(header)</tr></thead>")
                 } else {
-                    // 数据行
-                    let row = cells.map { "<td>\($0)</td>" }.joined()
+                    let row = cells.map { "<td>\(formatInline($0))</td>" }.joined()
                     tableRows.append("<tr>\(row)</tr>")
                 }
-            } else {
-                if inTable {
-                    result.append("<table>" + tableRows.joined() + "</table>")
-                    inTable = false
-                    tableRows = []
-                }
-                result.append(line)
+                continue
             }
+
+            if inTable {
+                htmlLines.append("<table>" + tableRows.joined() + "</table>")
+                inTable = false
+                tableRows = []
+            }
+
+            // List items
+            if line.hasPrefix("- ") {
+                if !inList {
+                    inList = true
+                    listItems = []
+                }
+                listItems.append("<li>\(formatInline(String(line.dropFirst(2))))</li>")
+                continue
+            }
+
+            if inList {
+                htmlLines.append("<ul>" + listItems.joined() + "</ul>")
+                inList = false
+                listItems = []
+            }
+
+            // Headings
+            if line.hasPrefix("### ") {
+                htmlLines.append("<h3>\(formatInline(String(line.dropFirst(4))))</h3>")
+                continue
+            }
+            if line.hasPrefix("## ") {
+                htmlLines.append("<h2>\(formatInline(String(line.dropFirst(3))))</h2>")
+                continue
+            }
+            if line.hasPrefix("# ") {
+                htmlLines.append("<h1>\(formatInline(String(line.dropFirst(2))))</h1>")
+                continue
+            }
+
+            // Horizontal rule
+            if line.trimmingCharacters(in: .whitespaces) == "---" {
+                htmlLines.append("<hr>")
+                continue
+            }
+
+            // Blockquote
+            if line.hasPrefix("> ") {
+                htmlLines.append("<blockquote>\(formatInline(String(line.dropFirst(2))))</blockquote>")
+                continue
+            }
+
+            // Empty line
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                htmlLines.append("")
+                continue
+            }
+
+            // Regular paragraph
+            htmlLines.append("<p>\(formatInline(line))</p>")
         }
-        
+
+        // Close any open structures
         if inTable {
-            result.append("<table>" + tableRows.joined() + "</table>")
+            htmlLines.append("<table>" + tableRows.joined() + "</table>")
         }
-        
-        return result.joined(separator: "\n")
+        if inList {
+            htmlLines.append("<ul>" + listItems.joined() + "</ul>")
+        }
+        if inCodeBlock {
+            htmlLines.append("<pre><code>\(codeContent)</code></pre>")
+        }
+
+        return htmlLines.joined(separator: "\n")
+    }
+
+    /// Format inline elements (bold, code, links)
+    private func formatInline(_ text: String) -> String {
+        var result = text
+
+        // Bold
+        result = result.replacingOccurrences(of: "\\*\\*(.+?)\\*\\*", with: "<strong>$1</strong>", options: .regularExpression)
+
+        // Inline code
+        result = result.replacingOccurrences(of: "`([^`]+)`", with: "<code>$1</code>", options: .regularExpression)
+
+        // Links
+        result = result.replacingOccurrences(of: "\\[([^\\]]+)\\]\\(([^)]+)\\)", with: "<a href=\"$2\">$1</a>", options: .regularExpression)
+
+        return result
     }
     
     /// 生成导航
