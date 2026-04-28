@@ -17,6 +17,8 @@ struct AppContainer: View {
     @State private var showingCookiesEditor = false
     @State private var showingScriptEditor = false
     @State private var showingTestCaseEditor = false
+    @State private var showingDocServerSettings = false
+    @State private var newDocServerPort: Int?
     @State private var cookieJar = CookieJar()
     @State private var scripts: [Script] = []
     @State private var testCases: [TestCase] = []
@@ -31,7 +33,7 @@ struct AppContainer: View {
     private var projectRepository: MySQLProjectRepository?
     private var requestDocumentRepository: MySQLRequestDocumentRepository?
     private var mysqlDatabase: MySQLDatabase?
-    private var docServer: DocServer?
+    @State private var docServer: DocServer?
 
     init() {
         let storage = CookieStorage()
@@ -53,8 +55,9 @@ struct AppContainer: View {
             self.requestDocumentRepository = try MySQLRequestDocumentRepository(database: mysqlDatabase)
             print("仓库初始化完成")
             
-            self.docServer = DocServer(database: mysqlDatabase)
-            try? self.docServer?.start()
+            let server = DocServer(database: mysqlDatabase)
+            try? server.start()
+            _docServer = State(initialValue: server)
             
             // 从数据库加载数据
             let loadedProjects = try projectRepository?.fetchAllProjects() ?? []
@@ -91,7 +94,8 @@ struct AppContainer: View {
             self.requestDocumentRepository = nil
             self.historyPersistence = HistoryPersistence.inMemory
             self.testCaseManager = TestCaseManager()
-            
+            _docServer = State(initialValue: nil)
+
             // 使用默认数据
             let initialProject = RequestProject(name: "默认项目")
             let initialRequest = RequestDocument.starter(projectID: initialProject.id)
@@ -378,6 +382,14 @@ struct AppContainer: View {
             .font(.system(size: 13, weight: .medium))
             .buttonStyle(.bordered)
             .controlSize(.large)
+
+            Button("文档设置") {
+                showingDocServerSettings = true
+            }
+            .frame(width: 80, height: 40)
+            .font(.system(size: 13, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
@@ -406,6 +418,23 @@ struct AppContainer: View {
                 testCases: $testCases,
                 requestID: selectedRequestID ?? UUID()
             )
+        }
+        .sheet(isPresented: $showingDocServerSettings) {
+            DocServerSettingsView(
+                isPresented: $showingDocServerSettings,
+                server: docServer,
+                onRestart: { newPort in
+                    newDocServerPort = newPort
+                }
+            )
+        }
+        .onChange(of: newDocServerPort) { _, newPort in
+            guard let newPort else { return }
+            docServer?.stop()
+            guard let mysqlDatabase else { return }
+            docServer = DocServer(port: newPort, database: mysqlDatabase)
+            try? docServer?.start()
+            newDocServerPort = nil
         }
     }
 

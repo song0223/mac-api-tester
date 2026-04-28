@@ -6,6 +6,7 @@ import Testing
 struct DocServerIntegrationTests {
 
     private func setup(_ db: MySQLDatabase) throws {
+        try db.execute("SET FOREIGN_KEY_CHECKS = 0")
         try db.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id VARCHAR(36) PRIMARY KEY,
@@ -25,6 +26,7 @@ struct DocServerIntegrationTests {
                 INDEX idx_project_id (project_id)
             )
         """)
+        try db.execute("SET FOREIGN_KEY_CHECKS = 1")
     }
 
     private func cleanup(_ db: MySQLDatabase, projectID: String) throws {

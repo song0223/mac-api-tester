@@ -6,10 +6,12 @@ import Testing
 struct DatabaseMigrationTests {
 
     private func setupMySQLTables(_ mysqlDb: MySQLDatabase) throws {
+        try mysqlDb.execute("SET FOREIGN_KEY_CHECKS = 0")
         try mysqlDb.execute("DROP TABLE IF EXISTS request_history")
         try mysqlDb.execute("DROP TABLE IF EXISTS request_documents")
         try mysqlDb.execute("DROP TABLE IF EXISTS api_documents")
         try mysqlDb.execute("DROP TABLE IF EXISTS projects")
+        try mysqlDb.execute("SET FOREIGN_KEY_CHECKS = 1")
     }
 
     private func createSQLiteSchema(_ sqliteDb: SQLiteDatabase) throws {

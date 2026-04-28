@@ -6,7 +6,7 @@ protocol TestRunnerDelegate: AnyObject {
     func testRunner(_ runner: TestRunner, didCompleteSuite result: TestSuiteResult)
 }
 
-final class TestRunner {
+final class TestRunner: @unchecked Sendable {
     weak var delegate: TestRunnerDelegate?
     
     private let httpClient: HTTPClient

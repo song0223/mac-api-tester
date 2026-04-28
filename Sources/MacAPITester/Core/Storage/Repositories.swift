@@ -331,3 +331,233 @@ final class MySQLHistoryRepository: MySQLRepository {
         }
     }
 }
+
+// MARK: - 项目仓库
+
+struct MySQLProjectRecord: Equatable {
+    let id: String
+    let name: String
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+final class MySQLProjectRepository: MySQLRepository {
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    override init(database: MySQLDatabase) throws {
+        try super.init(database: database)
+        // 表已在 DatabaseMigration 中创建
+    }
+
+    func createProject(id: String, name: String) throws {
+        try database.execute(
+            "INSERT INTO projects (id, name) VALUES (?, ?)",
+            parameters: [.string(id), .string(name)]
+        )
+    }
+
+    func updateProject(id: String, name: String) throws {
+        try database.execute(
+            "UPDATE projects SET name = ? WHERE id = ?",
+            parameters: [.string(name), .string(id)]
+        )
+    }
+
+    func deleteProject(id: String) throws {
+        try database.execute(
+            "DELETE FROM projects WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+
+    func fetchAllProjects() throws -> [MySQLProjectRecord] {
+        let rows = try database.query("SELECT id, name, created_at, updated_at FROM projects ORDER BY created_at ASC")
+        return rows.compactMap { row -> MySQLProjectRecord? in
+            guard let id = row["id"] as? String,
+                  let name = row["name"] as? String else {
+                return nil
+            }
+
+            let createdAt: Date
+            if let dateString = row["created_at"] as? String {
+                createdAt = Self.dateFormatter.date(from: dateString) ?? Date()
+            } else {
+                createdAt = Date()
+            }
+
+            let updatedAt: Date
+            if let dateString = row["updated_at"] as? String {
+                updatedAt = Self.dateFormatter.date(from: dateString) ?? Date()
+            } else {
+                updatedAt = Date()
+            }
+
+            return MySQLProjectRecord(id: id, name: name, createdAt: createdAt, updatedAt: updatedAt)
+        }
+    }
+}
+
+// MARK: - 请求文档仓库
+
+struct MySQLRequestDocumentRecord: Equatable {
+    let id: String
+    let projectID: String
+    let name: String
+    let apiStatus: String
+    let descriptionText: String
+    let method: String
+    let urlString: String
+    let queryText: String
+    let headersText: String
+    let bodyText: String
+    let variablesText: String
+    let authType: String
+    let authConfig: String?
+}
+
+final class MySQLRequestDocumentRepository: MySQLRepository {
+    override init(database: MySQLDatabase) throws {
+        try super.init(database: database)
+        // 表已在 DatabaseMigration 中创建
+    }
+
+    func createRequestDocument(_ document: MySQLRequestDocumentRecord) throws {
+        let sql = """
+            INSERT INTO request_documents 
+            (id, project_id, name, api_status, description, method, url_string, query_text, headers_text, body_text, variables_text, auth_type, auth_config) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        
+        let parameters: [MySQLValue] = [
+            .string(document.id),
+            .string(document.projectID),
+            .string(document.name),
+            .string(document.apiStatus),
+            .string(document.descriptionText),
+            .string(document.method),
+            .string(document.urlString),
+            .string(document.queryText),
+            .string(document.headersText),
+            .string(document.bodyText),
+            .string(document.variablesText),
+            .string(document.authType),
+            document.authConfig.map { .string($0) } ?? .null
+        ]
+        
+        try database.execute(sql, parameters: parameters)
+    }
+
+    func updateRequestDocument(_ document: MySQLRequestDocumentRecord) throws {
+        try database.execute(
+            """
+            UPDATE request_documents SET 
+            name = ?, api_status = ?, description = ?, method = ?, url_string = ?, 
+            query_text = ?, headers_text = ?, body_text = ?, variables_text = ?, 
+            auth_type = ?, auth_config = ?
+            WHERE id = ?
+            """,
+            parameters: [
+                .string(document.name),
+                .string(document.apiStatus),
+                .string(document.descriptionText),
+                .string(document.method),
+                .string(document.urlString),
+                .string(document.queryText),
+                .string(document.headersText),
+                .string(document.bodyText),
+                .string(document.variablesText),
+                .string(document.authType),
+                document.authConfig.map { .string($0) } ?? .null,
+                .string(document.id)
+            ]
+        )
+    }
+
+    func deleteRequestDocument(id: String) throws {
+        try database.execute(
+            "DELETE FROM request_documents WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+
+    func fetchRequestDocuments(projectID: String) throws -> [MySQLRequestDocumentRecord] {
+        let rows = try database.query(
+            """
+            SELECT id, project_id, name, api_status, description, method, url_string, 
+                   query_text, headers_text, body_text, variables_text, auth_type, auth_config 
+            FROM request_documents 
+            WHERE project_id = ? 
+            ORDER BY created_at ASC
+            """,
+            parameters: [.string(projectID)]
+        )
+        
+        return rows.compactMap { row -> MySQLRequestDocumentRecord? in
+            guard let id = row["id"] as? String,
+                  let projectId = row["project_id"] as? String,
+                  let name = row["name"] as? String,
+                  let method = row["method"] as? String,
+                  let urlString = row["url_string"] as? String else {
+                return nil
+            }
+
+            return MySQLRequestDocumentRecord(
+                id: id,
+                projectID: projectId,
+                name: name,
+                apiStatus: row["api_status"] as? String ?? "接口状态",
+                descriptionText: row["description"] as? String ?? "",
+                method: method,
+                urlString: urlString,
+                queryText: row["query_text"] as? String ?? "",
+                headersText: row["headers_text"] as? String ?? "",
+                bodyText: row["body_text"] as? String ?? "",
+                variablesText: row["variables_text"] as? String ?? "",
+                authType: row["auth_type"] as? String ?? "none",
+                authConfig: row["auth_config"] as? String
+            )
+        }
+    }
+
+    func fetchAllRequestDocuments() throws -> [MySQLRequestDocumentRecord] {
+        let rows = try database.query(
+            """
+            SELECT id, project_id, name, api_status, description, method, url_string, 
+                   query_text, headers_text, body_text, variables_text, auth_type, auth_config 
+            FROM request_documents 
+            ORDER BY created_at ASC
+            """
+        )
+        
+        return rows.compactMap { row -> MySQLRequestDocumentRecord? in
+            guard let id = row["id"] as? String,
+                  let projectId = row["project_id"] as? String,
+                  let name = row["name"] as? String,
+                  let method = row["method"] as? String,
+                  let urlString = row["url_string"] as? String else {
+                return nil
+            }
+
+            return MySQLRequestDocumentRecord(
+                id: id,
+                projectID: projectId,
+                name: name,
+                apiStatus: row["api_status"] as? String ?? "接口状态",
+                descriptionText: row["description"] as? String ?? "",
+                method: method,
+                urlString: urlString,
+                queryText: row["query_text"] as? String ?? "",
+                headersText: row["headers_text"] as? String ?? "",
+                bodyText: row["body_text"] as? String ?? "",
+                variablesText: row["variables_text"] as? String ?? "",
+                authType: row["auth_type"] as? String ?? "none",
+                authConfig: row["auth_config"] as? String
+            )
+        }
+    }
+}
