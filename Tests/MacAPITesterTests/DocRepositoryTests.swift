@@ -52,7 +52,7 @@ struct DocRepositoryTests {
         let fetched = try repository.fetchDocument(projectID: "test-project-1")
         #expect(fetched != nil)
         #expect(fetched?.title == "测试文档")
-        #expect(fetched?.html == html)
+        #expect(fetched?.htmlContent == html)
 
         try cleanup(database)
     }

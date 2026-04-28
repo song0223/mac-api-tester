@@ -1,25 +1,17 @@
 import Foundation
 
+struct MySQLDocRecord: Equatable {
+    let id: String
+    let projectID: String
+    let title: String
+    let htmlContent: String
+}
+
 final class DocRepository: MySQLRepository {
 
     override init(database: MySQLDatabase) throws {
         try super.init(database: database)
-        try createTable()
-    }
-
-    private func createTable() throws {
-        try database.execute("""
-            CREATE TABLE IF NOT EXISTS api_documents (
-                id VARCHAR(36) PRIMARY KEY,
-                project_id VARCHAR(36) NOT NULL,
-                title VARCHAR(255) NOT NULL,
-                html_content LONGTEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                INDEX idx_project_id (project_id)
-            )
-        """)
+        // 表已在 DatabaseMigration 中创建
     }
 
     func saveDocument(id: String, projectID: String, title: String, html: String) throws {
@@ -40,32 +32,51 @@ final class DocRepository: MySQLRepository {
         )
     }
 
-    func fetchDocument(projectID: String) throws -> (id: String, title: String, html: String)? {
+    func fetchDocument(projectID: String) throws -> MySQLDocRecord? {
         let results = try database.query(
-            "SELECT id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1",
+            "SELECT id, project_id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1",
             parameters: [.string(projectID)]
         )
 
         guard let row = results.first,
               let id = row["id"] as? String,
+              let projectID = row["project_id"] as? String,
               let title = row["title"] as? String,
-              let html = row["html_content"] as? String else {
+              let htmlContent = row["html_content"] as? String else {
             return nil
         }
 
-        return (id: id, title: title, html: html)
+        return MySQLDocRecord(id: id, projectID: projectID, title: title, htmlContent: htmlContent)
     }
 
-    func fetchAllDocuments() throws -> [(id: String, projectID: String, title: String)] {
-        let results = try database.query("SELECT id, project_id, title FROM api_documents ORDER BY updated_at DESC")
+    func fetchDocuments(projectID: String) throws -> [MySQLDocRecord] {
+        let results = try database.query(
+            "SELECT id, project_id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY updated_at DESC",
+            parameters: [.string(projectID)]
+        )
 
         return results.compactMap { row in
             guard let id = row["id"] as? String,
                   let projectID = row["project_id"] as? String,
-                  let title = row["title"] as? String else {
+                  let title = row["title"] as? String,
+                  let htmlContent = row["html_content"] as? String else {
                 return nil
             }
-            return (id: id, projectID: projectID, title: title)
+            return MySQLDocRecord(id: id, projectID: projectID, title: title, htmlContent: htmlContent)
+        }
+    }
+
+    func fetchAllDocuments() throws -> [MySQLDocRecord] {
+        let results = try database.query("SELECT id, project_id, title, html_content FROM api_documents ORDER BY updated_at DESC")
+
+        return results.compactMap { row in
+            guard let id = row["id"] as? String,
+                  let projectID = row["project_id"] as? String,
+                  let title = row["title"] as? String,
+                  let htmlContent = row["html_content"] as? String else {
+                return nil
+            }
+            return MySQLDocRecord(id: id, projectID: projectID, title: title, htmlContent: htmlContent)
         }
     }
 
