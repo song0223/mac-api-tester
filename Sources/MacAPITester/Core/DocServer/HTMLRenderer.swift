@@ -294,6 +294,78 @@ final class HTMLRenderer {
                     padding: 20px;
                 }
             }
+            
+            @media (prefers-color-scheme: dark) {
+                body {
+                    color: #e0e0e0;
+                    background-color: #1a1a1a;
+                }
+                
+                .sidebar {
+                    background: #242424;
+                    border-right-color: #404040;
+                }
+                
+                .search-box input {
+                    background: #2a2a2a;
+                    border-color: #404040;
+                    color: #e0e0e0;
+                }
+                
+                .nav-list a {
+                    color: #6db3f2;
+                }
+                
+                h1 {
+                    color: #f0f0f0;
+                }
+                
+                h2 {
+                    color: #e0e0e0;
+                    border-bottom-color: #6db3f2;
+                }
+                
+                h3 {
+                    color: #d0d0d0;
+                }
+                
+                code {
+                    background: #2a2a2a;
+                    color: #e0e0e0;
+                }
+                
+                pre {
+                    background: #1e1e1e;
+                    color: #d4d4d4;
+                }
+                
+                pre code {
+                    background: none;
+                    color: inherit;
+                }
+                
+                th, td {
+                    border-color: #404040;
+                }
+                
+                th {
+                    background: #2a2a2a;
+                }
+                
+                tr:nth-child(even) {
+                    background: #222222;
+                }
+                
+                hr {
+                    border-top-color: #404040;
+                }
+                
+                blockquote {
+                    border-left-color: #6db3f2;
+                    background: #242424;
+                    color: #b0b0b0;
+                }
+            }
         </style>
         """
     }
