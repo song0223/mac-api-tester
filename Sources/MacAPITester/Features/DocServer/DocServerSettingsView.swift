@@ -6,7 +6,7 @@ struct DocServerSettingsView: View {
     let server: DocServer?
     let onRestart: (Int) -> Void
 
-    @State private var port: String = "8080"
+    @State private var port: String = "80888"
     @State private var isRunning: Bool = false
 
     var body: some View {

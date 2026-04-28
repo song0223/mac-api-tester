@@ -5,7 +5,7 @@ import NIOHTTP1
 
 /// 文档服务器配置
 struct DocServerConfig {
-    var port: Int = 8080
+    var port: Int = 80888
     var host: String = "0.0.0.0"
 }
 
@@ -17,7 +17,7 @@ final class DocServer {
     private var channel: Channel?
     private var group: MultiThreadedEventLoopGroup?
 
-    init(port: Int = 8080, host: String = "0.0.0.0", database: MySQLDatabase) {
+    init(port: Int = 80888, host: String = "0.0.0.0", database: MySQLDatabase) {
         self.port = port
         self.host = host
         self.database = database

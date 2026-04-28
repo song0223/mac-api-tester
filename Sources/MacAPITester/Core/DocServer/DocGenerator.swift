@@ -64,7 +64,7 @@ enum DocGenerator {
                 return ParamInfo(
                     name: String(parts[0]).trimmingCharacters(in: .whitespaces),
                     type: "string",
-                    required: false,
+                    required: true,
                     description: ""
                 )
             }

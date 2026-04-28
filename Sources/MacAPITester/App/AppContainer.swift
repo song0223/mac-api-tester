@@ -250,7 +250,7 @@ struct AppContainer: View {
     private func workspaceMetaRow(request: Binding<RequestDocument>) -> some View {
         HStack(spacing: 10) {
             statusAndNameRow(request: request)
-                .frame(width: 540)
+                .frame(width: 300)
 
             simpleInput(text: request.descriptionText, placeholder: "(选填) 请输入接口描述")
 
@@ -268,30 +268,11 @@ struct AppContainer: View {
 
     private func statusAndNameRow(request: Binding<RequestDocument>) -> some View {
         HStack(spacing: 0) {
-            Menu {
-                Button("接口状态") { request.apiStatus.wrappedValue = "接口状态" }
-                Button("开发中") { request.apiStatus.wrappedValue = "开发中" }
-                Button("已完成") { request.apiStatus.wrappedValue = "已完成" }
-            } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.secondary.opacity(0.65))
-                        .frame(width: 7, height: 7)
-                    Text(request.apiStatus.wrappedValue)
-                        .foregroundStyle(.primary)
-                }
-                .padding(.horizontal, 12)
-                .frame(width: 180, height: 36, alignment: .leading)
-            }
-            .menuStyle(.borderlessButton)
-
-            Divider()
-                .frame(height: 22)
-
             TextField("接口名称", text: request.name)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         }
         .background(
