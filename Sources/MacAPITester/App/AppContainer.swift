@@ -16,37 +16,90 @@ struct AppContainer: View {
     @State private var statusMessage: String?
     @State private var showingCookiesEditor = false
     @State private var showingScriptEditor = false
+    @State private var showingTestCaseEditor = false
     @State private var cookieJar = CookieJar()
     @State private var scripts: [Script] = []
+    @State private var testCases: [TestCase] = []
+    @State private var testSuites: [TestSuite] = []
     private let workspaceBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
 
     private let templateRenderer = TemplateRenderer()
     private let httpClient = HTTPClient()
-    private let historyPersistence: HistoryPersistence
+    private var historyPersistence: HistoryPersistence
     private let cookieManager: CookieManager
+    private var testCaseManager: TestCaseManager
+    private var projectRepository: MySQLProjectRepository?
+    private var requestDocumentRepository: MySQLRequestDocumentRepository?
+    private var mysqlDatabase: MySQLDatabase?
+    private var docServer: DocServer?
 
     init() {
-        let initialProject = RequestProject(name: "默认项目")
-        let initialRequest = RequestDocument.starter(projectID: initialProject.id)
-        _projects = State(initialValue: [initialProject])
-        _selectedProjectID = State(initialValue: initialProject.id)
-        _requests = State(initialValue: [initialRequest])
-        _openedRequestIDs = State(initialValue: [initialRequest.id])
-        _selectedRequestID = State(initialValue: initialRequest.id)
-
         let storage = CookieStorage()
         let manager = CookieManager(storage: storage)
         self.cookieManager = manager
         _cookieJar = State(initialValue: manager.cookieJar)
 
         do {
+            print("正在初始化MySQL数据库...")
             let mysqlDatabase = try MySQLDatabase()
+            print("MySQL数据库连接成功")
             let migration = DatabaseMigration(mysqlDatabase: mysqlDatabase)
             try migration.migrate()
+            print("数据库迁移完成")
+            self.mysqlDatabase = mysqlDatabase
             self.historyPersistence = HistoryPersistence(database: mysqlDatabase)
+            self.testCaseManager = TestCaseManager(database: mysqlDatabase)
+            self.projectRepository = try MySQLProjectRepository(database: mysqlDatabase)
+            self.requestDocumentRepository = try MySQLRequestDocumentRepository(database: mysqlDatabase)
+            print("仓库初始化完成")
+            
+            self.docServer = DocServer(database: mysqlDatabase)
+            try? self.docServer?.start()
+            
+            // 从数据库加载数据
+            let loadedProjects = try projectRepository?.fetchAllProjects() ?? []
+            let allRequestDocuments = try requestDocumentRepository?.fetchAllRequestDocuments() ?? []
+            
+            if loadedProjects.isEmpty {
+                // 数据库为空，创建默认项目
+                let initialProject = RequestProject(name: "默认项目")
+                let initialRequest = RequestDocument.starter(projectID: initialProject.id)
+                _projects = State(initialValue: [initialProject])
+                _selectedProjectID = State(initialValue: initialProject.id)
+                _requests = State(initialValue: [initialRequest])
+                _openedRequestIDs = State(initialValue: [initialRequest.id])
+                _selectedRequestID = State(initialValue: initialRequest.id)
+                
+                // 保存到数据库
+                try projectRepository?.createProject(id: initialProject.id.uuidString, name: initialProject.name)
+                try requestDocumentRepository?.createRequestDocument(initialRequest.toMySQLRecord())
+            } else {
+                // 从数据库加载
+                let projects = loadedProjects.map { RequestProject(id: UUID(uuidString: $0.id) ?? UUID(), name: $0.name) }
+                let requests = allRequestDocuments.compactMap { RequestDocument.fromMySQLRecord($0) }
+                
+                _projects = State(initialValue: projects)
+                _selectedProjectID = State(initialValue: projects.first?.id)
+                _requests = State(initialValue: requests)
+                _openedRequestIDs = State(initialValue: Array(requests.prefix(5).map { $0.id }))
+                _selectedRequestID = State(initialValue: requests.first?.id)
+            }
         } catch {
             print("MySQL初始化失败，使用内存存储: \(error)")
+            self.mysqlDatabase = nil
+            self.projectRepository = nil
+            self.requestDocumentRepository = nil
             self.historyPersistence = HistoryPersistence.inMemory
+            self.testCaseManager = TestCaseManager()
+            
+            // 使用默认数据
+            let initialProject = RequestProject(name: "默认项目")
+            let initialRequest = RequestDocument.starter(projectID: initialProject.id)
+            _projects = State(initialValue: [initialProject])
+            _selectedProjectID = State(initialValue: initialProject.id)
+            _requests = State(initialValue: [initialRequest])
+            _openedRequestIDs = State(initialValue: [initialRequest.id])
+            _selectedRequestID = State(initialValue: initialRequest.id)
             _statusMessage = State(initialValue: "⚠️ MySQL连接失败，使用临时内存存储（数据不会持久化）")
         }
     }
@@ -271,54 +324,64 @@ struct AppContainer: View {
     }
 
     private var bottomActionBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+            // 核心操作按钮组
             Button("保存") {
                 saveCurrentDraft()
             }
-            .frame(width: 176, height: 50)
-            .font(.system(size: 16, weight: .semibold))
+            .frame(width: 100, height: 40)
+            .font(.system(size: 14, weight: .semibold))
             .buttonStyle(.bordered)
             .controlSize(.large)
 
             Button("生成文档") {
                 generateDocument()
             }
-            .frame(width: 176, height: 50)
-            .font(.system(size: 16, weight: .semibold))
+            .frame(width: 100, height: 40)
+            .font(.system(size: 14, weight: .semibold))
             .buttonStyle(.bordered)
             .controlSize(.large)
 
             Button(isSending ? "调试中..." : "运行调试") {
                 triggerSend()
             }
-            .frame(width: 192, height: 50)
-            .font(.system(size: 16, weight: .semibold))
+            .frame(width: 120, height: 40)
+            .font(.system(size: 14, weight: .semibold))
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(isSending || selectedRequestBinding == nil)
 
             Divider()
-                .frame(height: 28)
+                .frame(height: 24)
 
+            // 工具按钮组
             Button("Cookies") {
                 showingCookiesEditor = true
             }
-            .frame(height: 50)
-            .font(.system(size: 14, weight: .medium))
+            .frame(width: 80, height: 40)
+            .font(.system(size: 13, weight: .medium))
             .buttonStyle(.bordered)
             .controlSize(.large)
 
             Button("脚本") {
                 showingScriptEditor = true
             }
-            .frame(height: 50)
-            .font(.system(size: 14, weight: .medium))
+            .frame(width: 60, height: 40)
+            .font(.system(size: 13, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button("测试用例") {
+                showingTestCaseEditor = true
+            }
+            .frame(width: 80, height: 40)
+            .font(.system(size: 13, weight: .medium))
             .buttonStyle(.bordered)
             .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(workspaceBackground)
         .sheet(isPresented: $showingCookiesEditor) {
             CookiesEditorView(
@@ -336,6 +399,12 @@ struct AppContainer: View {
             ScriptEditorView(
                 scripts: $scripts,
                 onRequestUpdate: { _ in }
+            )
+        }
+        .sheet(isPresented: $showingTestCaseEditor) {
+            TestCaseEditorView(
+                testCases: $testCases,
+                requestID: selectedRequestID ?? UUID()
             )
         }
     }
@@ -382,6 +451,9 @@ struct AppContainer: View {
         selectedRequestID = request.id
         errorMessage = nil
         statusMessage = "已新增接口草稿：\(request.name)"
+        
+        // 同步到数据库
+        syncRequestToDatabase(request, isNew: true)
     }
 
     private func closeRequestTab(_ id: RequestDocument.ID) {
@@ -426,6 +498,9 @@ struct AppContainer: View {
         }
 
         statusMessage = "已删除接口：\(removedRequest.name)"
+        
+        // 从数据库删除
+        syncRequestDeletion(id)
     }
 
     private func addProject() {
@@ -437,12 +512,19 @@ struct AppContainer: View {
         openRequestTabIfNeeded(seedRequest.id)
         selectedRequestID = seedRequest.id
         statusMessage = "已新增项目：\(project.name)"
+        
+        // 同步到数据库
+        syncProjectToDatabase(project, isNew: true)
+        syncRequestToDatabase(seedRequest, isNew: true)
     }
 
     private func renameProject(_ id: RequestProject.ID, _ newName: String) {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
         projects[index].name = newName
         statusMessage = "已重命名项目：\(newName)"
+        
+        // 同步到数据库
+        syncProjectToDatabase(projects[index], isNew: false)
     }
 
     private func deleteProject(_ id: RequestProject.ID) {
@@ -473,6 +555,12 @@ struct AppContainer: View {
         }
 
         statusMessage = "已删除项目：\(removingProject.name)"
+        
+        // 从数据库删除
+        syncProjectDeletion(id)
+        for requestID in removingRequestIDs {
+            syncRequestDeletion(requestID)
+        }
     }
 
     private func openRequestTabIfNeeded(_ id: RequestDocument.ID) {
@@ -481,6 +569,63 @@ struct AppContainer: View {
         }
         if !openedRequestIDs.contains(id) {
             openedRequestIDs.append(id)
+        }
+    }
+    
+    // MARK: - 数据库同步方法
+    
+    private func syncProjectToDatabase(_ project: RequestProject, isNew: Bool) {
+        guard let projectRepository else { return }
+        
+        do {
+            if isNew {
+                try projectRepository.createProject(id: project.id.uuidString, name: project.name)
+            } else {
+                try projectRepository.updateProject(id: project.id.uuidString, name: project.name)
+            }
+        } catch {
+            print("同步项目到数据库失败: \(error)")
+        }
+    }
+    
+    private func syncProjectDeletion(_ id: RequestProject.ID) {
+        guard let projectRepository else { return }
+        
+        do {
+            try projectRepository.deleteProject(id: id.uuidString)
+        } catch {
+            print("从数据库删除项目失败: \(error)")
+        }
+    }
+    
+    private func syncRequestToDatabase(_ request: RequestDocument, isNew: Bool) {
+        guard let requestDocumentRepository else { 
+            print("requestDocumentRepository为空，跳过同步")
+            return 
+        }
+        
+        do {
+            let record = request.toMySQLRecord()
+            print("准备同步请求到数据库: \(request.name), isNew: \(isNew)")
+            if isNew {
+                try requestDocumentRepository.createRequestDocument(record)
+                print("请求创建成功: \(request.name)")
+            } else {
+                try requestDocumentRepository.updateRequestDocument(record)
+                print("请求更新成功: \(request.name)")
+            }
+        } catch {
+            print("同步请求到数据库失败: \(error)")
+        }
+    }
+    
+    private func syncRequestDeletion(_ id: RequestDocument.ID) {
+        guard let requestDocumentRepository else { return }
+        
+        do {
+            try requestDocumentRepository.deleteRequestDocument(id: id.uuidString)
+        } catch {
+            print("从数据库删除请求失败: \(error)")
         }
     }
 
@@ -534,7 +679,14 @@ struct AppContainer: View {
 
     private func saveCurrentDraft() {
         guard let binding = selectedRequestBinding else { return }
-        statusMessage = "已保存草稿：\(binding.wrappedValue.name)"
+        let request = binding.wrappedValue
+        statusMessage = "已保存草稿：\(request.name)"
+        
+        // 同步到数据库
+        syncRequestToDatabase(request, isNew: false)
+        
+        // 生成文档
+        generateDocumentation()
     }
 
     private func generateDocument() {
@@ -561,6 +713,36 @@ struct AppContainer: View {
         pasteboard.clearContents()
         pasteboard.setString(markdown, forType: .string)
         statusMessage = "接口文档已复制到剪贴板"
+    }
+
+    private func generateDocumentation() {
+        guard let selectedProjectID,
+              let project = projects.first(where: { $0.id == selectedProjectID }) else {
+            return
+        }
+        
+        let projectRequests = requests.filter { $0.projectID == selectedProjectID }
+        
+        do {
+            let model = DocGenerator.buildDocModel(project: project, requests: projectRequests)
+            let html = HTMLRenderer().render(DocGenerator.renderMarkdown(model), title: project.name)
+            
+            guard let database = mysqlDatabase else { return }
+            let repository = try DocRepository(database: database)
+            
+            try repository.saveDocument(
+                id: project.id.uuidString,
+                projectID: project.id.uuidString,
+                title: project.name,
+                html: html
+            )
+            
+            if let url = docServer?.accessURL {
+                statusMessage = "文档已更新，访问 \(url) 查看"
+            }
+        } catch {
+            statusMessage = "文档生成失败: \(error.localizedDescription)"
+        }
     }
 
     private func buildRequest(
