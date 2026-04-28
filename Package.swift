@@ -14,6 +14,9 @@ let package = Package(
             targets: ["MacAPITester"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.72.0"),
+    ],
     targets: [
         .systemLibrary(
             name: "CMySQL",
@@ -24,7 +27,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacAPITester",
-            dependencies: ["CMySQL"],
+            dependencies: [
+                "CMySQL",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ],
             path: "Sources/MacAPITester",
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
