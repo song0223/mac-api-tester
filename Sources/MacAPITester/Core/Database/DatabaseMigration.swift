@@ -81,6 +81,19 @@ final class DatabaseMigration {
                 UNIQUE KEY uk_domain_path_name (domain, path, name)
             )
         """)
+
+        try mysqlDatabase.execute("""
+            CREATE TABLE IF NOT EXISTS api_documents (
+                id VARCHAR(36) PRIMARY KEY,
+                project_id VARCHAR(36) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                html_content LONGTEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                INDEX idx_project_id (project_id)
+            )
+        """)
     }
 
     private func migrateDataFromSQLite(_ sqliteDatabase: SQLiteDatabase) throws {

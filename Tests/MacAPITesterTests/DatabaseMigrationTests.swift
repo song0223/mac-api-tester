@@ -8,6 +8,7 @@ struct DatabaseMigrationTests {
     private func setupMySQLTables(_ mysqlDb: MySQLDatabase) throws {
         try mysqlDb.execute("DROP TABLE IF EXISTS request_history")
         try mysqlDb.execute("DROP TABLE IF EXISTS request_documents")
+        try mysqlDb.execute("DROP TABLE IF EXISTS api_documents")
         try mysqlDb.execute("DROP TABLE IF EXISTS projects")
     }
 
@@ -68,6 +69,7 @@ struct DatabaseMigrationTests {
         #expect(tableNames.contains("projects"))
         #expect(tableNames.contains("request_documents"))
         #expect(tableNames.contains("request_history"))
+        #expect(tableNames.contains("api_documents"))
 
         try setupMySQLTables(mysqlDb)
     }
@@ -114,6 +116,7 @@ struct DatabaseMigrationTests {
         #expect(tableNames.contains("projects"))
         #expect(tableNames.contains("request_documents"))
         #expect(tableNames.contains("request_history"))
+        #expect(tableNames.contains("api_documents"))
 
         try setupMySQLTables(mysqlDb)
     }
