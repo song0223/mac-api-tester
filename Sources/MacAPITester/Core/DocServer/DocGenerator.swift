@@ -1,8 +1,14 @@
 import Foundation
 
-final class DocGenerator {
+enum DocGenerator {
 
-    func buildDocModel(project: RequestProject, requests: [RequestDocument]) -> APIDocModel {
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    static func buildDocModel(project: RequestProject, requests: [RequestDocument]) -> APIDocModel {
         let sections = requests.map { request in
             buildSection(from: request)
         }
@@ -15,10 +21,15 @@ final class DocGenerator {
         )
     }
 
-    private func buildSection(from request: RequestDocument) -> APIDocSection {
-        let queryParams = parseParams(from: request.queryText, separator: "=")
-        let headers = parseParams(from: request.headersText, separator: ":")
-        let bodyParams = parseParams(from: request.bodyText, separator: "=")
+    private static func buildSection(from request: RequestDocument) -> APIDocSection {
+        let queryParams = parseLines(from: request.queryText, separator: "=")
+        let headers = parseLines(from: request.headersText, separator: ":")
+        let bodyParams: [ParamInfo]
+        if isJSONBody(request.bodyText) {
+            bodyParams = []
+        } else {
+            bodyParams = parseLines(from: request.bodyText, separator: "=")
+        }
 
         return APIDocSection(
             id: request.id.uuidString,
@@ -36,7 +47,12 @@ final class DocGenerator {
         )
     }
 
-    private func parseParams(from text: String, separator: Character) -> [ParamInfo] {
+    private static func isJSONBody(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("{") || trimmed.hasPrefix("[")
+    }
+
+    private static func parseLines(from text: String, separator: Character) -> [ParamInfo] {
         guard !text.isEmpty else { return [] }
 
         return text.components(separatedBy: .newlines)
@@ -54,7 +70,7 @@ final class DocGenerator {
             }
     }
 
-    private func parseVariables(from text: String) -> [String: String] {
+    private static func parseVariables(from text: String) -> [String: String] {
         guard !text.isEmpty else { return [:] }
 
         var variables: [String: String] = [:]
@@ -69,90 +85,100 @@ final class DocGenerator {
         return variables
     }
 
-    func renderMarkdown(_ model: APIDocModel) -> String {
-        var markdown = """
-        # API文档 - \(model.projectName)
+    static func renderMarkdown(_ model: APIDocModel) -> String {
+        var lines: [String] = []
 
-        > 生成时间：\(formatDate(model.generatedAt))
-
-        ## 目录
-
-        """
-
-        for section in model.sections {
-            markdown += "- [\(section.name)](#\(section.id))\n"
-        }
-
-        markdown += "\n---\n\n"
+        lines.append("# API文档 - \(model.projectName)")
+        lines.append("")
+        lines.append("> 生成时间：\(dateFormatter.string(from: model.generatedAt))")
+        lines.append("")
+        lines.append("## 目录")
+        lines.append("")
 
         for section in model.sections {
-            markdown += renderSection(section)
-            markdown += "\n---\n\n"
+            lines.append("- [\(section.name)](#\(section.id))")
         }
 
-        return markdown
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        for section in model.sections {
+            lines.append(renderSection(section))
+            lines.append("---")
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
-    private func renderSection(_ section: APIDocSection) -> String {
-        var markdown = """
-        ## \(section.name)
+    private static func renderSection(_ section: APIDocSection) -> String {
+        var lines: [String] = []
 
-        **URL:** `\(section.method) \(section.url)`
-
-        """
+        lines.append("## \(section.name)")
+        lines.append("")
+        lines.append("**URL:** `\(section.method) \(section.url)`")
+        lines.append("")
 
         if !section.description.isEmpty {
-            markdown += "**描述:** \(section.description)\n\n"
+            lines.append("**描述:** \(section.description)")
+            lines.append("")
         }
 
-        markdown += "**认证:** \(section.authType)\n\n"
+        lines.append("**认证:** \(section.authType)")
+        lines.append("")
 
         if !section.queryParams.isEmpty {
-            markdown += "### 请求参数\n\n"
-            markdown += "| 参数名 | 类型 | 必填 | 描述 |\n"
-            markdown += "|--------|------|------|------|\n"
+            lines.append("### 请求参数")
+            lines.append("")
+            lines.append("| 参数名 | 类型 | 必填 | 描述 |")
+            lines.append("|--------|------|------|------|")
             for param in section.queryParams {
-                markdown += "| \(param.name) | \(param.type) | \(param.required ? "是" : "否") | \(param.description) |\n"
+                lines.append("| \(param.name) | \(param.type) | \(param.required ? "是" : "否") | \(param.description) |")
             }
-            markdown += "\n"
+            lines.append("")
         }
 
         if !section.headers.isEmpty {
-            markdown += "### 请求头\n\n"
-            markdown += "| Header | 值 |\n"
-            markdown += "|--------|-----|\n"
+            lines.append("### 请求头")
+            lines.append("")
+            lines.append("| Header | 值 |")
+            lines.append("|--------|-----|")
             for header in section.headers {
-                markdown += "| \(header.name) | \(header.description) |\n"
+                lines.append("| \(header.name) | \(header.description) |")
             }
-            markdown += "\n"
+            lines.append("")
         }
 
         if let body = section.requestBody, !body.isEmpty {
-            markdown += "### 请求示例\n\n"
-            markdown += "```json\n\(body)\n```\n\n"
+            lines.append("### 请求示例")
+            lines.append("")
+            lines.append("```json")
+            lines.append(body)
+            lines.append("```")
+            lines.append("")
         }
 
         if let response = section.responseBody, !response.isEmpty {
-            markdown += "### 响应示例\n\n"
-            markdown += "```json\n\(response)\n```\n\n"
+            lines.append("### 响应示例")
+            lines.append("")
+            lines.append("```json")
+            lines.append(response)
+            lines.append("```")
+            lines.append("")
         }
 
         if !section.variables.isEmpty {
-            markdown += "### 环境变量\n\n"
-            markdown += "| 变量名 | 示例值 |\n"
-            markdown += "|--------|--------|\n"
+            lines.append("### 环境变量")
+            lines.append("")
+            lines.append("| 变量名 | 示例值 |")
+            lines.append("|--------|--------|")
             for (key, value) in section.variables {
-                markdown += "| \(key) | \(value) |\n"
+                lines.append("| \(key) | \(value) |")
             }
-            markdown += "\n"
+            lines.append("")
         }
 
-        return markdown
-    }
-
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.string(from: date)
+        return lines.joined(separator: "\n")
     }
 }
