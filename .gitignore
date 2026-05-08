@@ -9,3 +9,7 @@ DerivedData/
 
 # Documentation
 docs/
+
+# AI Tools
+.claude/
+.codex/
