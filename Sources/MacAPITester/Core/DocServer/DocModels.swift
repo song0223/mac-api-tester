@@ -21,6 +21,7 @@ struct APIDocSection: Codable, Equatable, Identifiable {
     let bodyParams: [ParamInfo]
     let requestBody: String?
     let responseBody: String?
+    let responseFields: [ResponseFieldDoc]
     let variables: [String: String]
 }
 
@@ -28,6 +29,14 @@ struct APIDocSection: Codable, Equatable, Identifiable {
 struct ParamInfo: Codable, Equatable {
     let name: String
     let type: String
+    let example: String
     let required: Bool
+    let description: String
+}
+
+/// 响应字段文档
+struct ResponseFieldDoc: Codable, Equatable {
+    let fieldName: String
+    let fieldType: String
     let description: String
 }

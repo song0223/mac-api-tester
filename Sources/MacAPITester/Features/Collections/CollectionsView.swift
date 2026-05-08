@@ -40,13 +40,14 @@ struct CollectionsView: View {
 
             HStack(spacing: 8) {
                 TextField("搜索接口", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
 
                 Button(action: onAddRequest) {
                     Image(systemName: "plus")
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.bordered)
+                .pointingHandCursor()
                 .help("新增接口")
                 .disabled(selectedProjectID == nil)
             }
@@ -88,9 +89,12 @@ struct CollectionsView: View {
                                     .frame(width: 18, height: 18)
                             }
                             .buttonStyle(.borderless)
+                            .pointingHandCursor()
                             .help("删除接口")
                         }
                         .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                        .pointingHandCursor()
                         .tag(request.id)
                     }
                 }
@@ -148,11 +152,12 @@ struct CollectionsView: View {
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.bordered)
+                .pointingHandCursor()
                 .help("新增项目")
             }
 
             ScrollView {
-                VStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(projects) { project in
                         let isSelected = project.id == selectedProjectID
                         HStack(spacing: 8) {
@@ -162,7 +167,7 @@ struct CollectionsView: View {
                             if editingProjectID == project.id {
                                 HStack(spacing: 6) {
                                     TextField("项目名称", text: $editingProjectName)
-                                        .textFieldStyle(.plain)
+                                        .inputFieldStyle()
                                         .font(.system(size: 12, weight: .semibold))
                                         .onSubmit {
                                             commitProjectRename(projectID: project.id)
@@ -176,6 +181,7 @@ struct CollectionsView: View {
                                             .foregroundStyle(.green)
                                     }
                                     .buttonStyle(.borderless)
+                                    .pointingHandCursor()
                                     .help("确认修改")
 
                                     Button {
@@ -186,6 +192,7 @@ struct CollectionsView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.borderless)
+                                    .pointingHandCursor()
                                     .help("取消修改")
                                 }
                             } else {
@@ -205,6 +212,7 @@ struct CollectionsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.borderless)
+                            .pointingHandCursor()
                             .help("重命名项目")
                             Button {
                                 pendingDeleteProject = project
@@ -214,6 +222,7 @@ struct CollectionsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.borderless)
+                            .pointingHandCursor()
                             .help("删除项目")
                         }
                         .padding(.horizontal, 8)
@@ -226,6 +235,7 @@ struct CollectionsView: View {
                         .onTapGesture {
                             selectedProjectID = project.id
                         }
+                        .pointingHandCursor()
                     }
                 }
             }

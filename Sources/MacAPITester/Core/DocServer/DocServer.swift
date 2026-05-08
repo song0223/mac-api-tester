@@ -194,10 +194,10 @@ final class HTTPHandler: ChannelInboundHandler {
                 let html = wrapWithBackButton(document.htmlContent, title: document.title)
                 sendResponse(html: html, context: context)
             } else {
-                sendResponse(html: "<h1>文档不存在</h1>", status: .notFound, context: context)
+                sendResponse(html: "<h1>文档不存在</h1><p>ProjectID: \(projectID)</p>", status: .notFound, context: context)
             }
         } catch {
-            sendResponse(html: "<h1>服务器错误</h1>", status: .internalServerError, context: context)
+            sendResponse(html: "<h1>服务器错误</h1><p>\(error.localizedDescription)</p>", status: .internalServerError, context: context)
         }
     }
 

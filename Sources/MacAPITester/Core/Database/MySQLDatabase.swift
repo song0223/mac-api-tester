@@ -15,17 +15,17 @@ final class MySQLDatabase: @unchecked Sendable {
 
     /// 初始化MySQL数据库连接
     /// - Parameters:
-    ///   - host: MySQL服务器地址，默认为"127.0.0.1"
+    ///   - host: MySQL服务器地址，默认为"47.100.236.45"
     ///   - port: MySQL服务器端口，默认为3306
     ///   - username: 数据库用户名，默认为"root"
-    ///   - password: 数据库密码，默认为空
+    ///   - password: 数据库密码，默认为"Netime@2023"
     ///   - database: 数据库名称，默认为"mac_api_tester"
     /// - Throws: `MySQLError.connectionFailed` 如果连接失败
     init(
-        host: String = "127.0.0.1",
+        host: String = "47.100.236.45",
         port: UInt32 = 3306,
         username: String = "root",
-        password: String = "",
+        password: String = "Netime@2023",
         database: String = "mac_api_tester"
     ) throws {
         self.host = host

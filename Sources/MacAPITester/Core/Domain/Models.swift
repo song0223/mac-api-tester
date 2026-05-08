@@ -102,6 +102,11 @@ struct RequestDocument: Identifiable, Equatable {
     var bodyText: String
     var variablesText: String
     var auth: RequestAuthConfiguration
+    var responseBody: String
+    var responseHeadersText: String
+    var responseStatusCode: Int
+    var responseDuration: Double
+    var responseFields: [ResponseFieldInfo]
 
     init(
         id: UUID = UUID(),
@@ -115,7 +120,12 @@ struct RequestDocument: Identifiable, Equatable {
         headersText: String = "",
         bodyText: String = "",
         variablesText: String = "",
-        auth: RequestAuthConfiguration = RequestAuthConfiguration()
+        auth: RequestAuthConfiguration = RequestAuthConfiguration(),
+        responseBody: String = "",
+        responseHeadersText: String = "",
+        responseStatusCode: Int = 0,
+        responseDuration: Double = 0,
+        responseFields: [ResponseFieldInfo] = []
     ) {
         self.id = id
         self.projectID = projectID
@@ -129,6 +139,11 @@ struct RequestDocument: Identifiable, Equatable {
         self.bodyText = bodyText
         self.variablesText = variablesText
         self.auth = auth
+        self.responseBody = responseBody
+        self.responseHeadersText = responseHeadersText
+        self.responseStatusCode = responseStatusCode
+        self.responseDuration = responseDuration
+        self.responseFields = responseFields
     }
 
     static func starter(named name: String = "Request 1", projectID: UUID) -> Self {
@@ -137,16 +152,17 @@ struct RequestDocument: Identifiable, Equatable {
             name: name,
             method: .get,
             urlString: "https://postman-echo.com/get",
-            queryText: "hello={{name}}",
+            queryText: "",
             headersText: "Accept: application/json",
             bodyText: "",
-            variablesText: "name=world",
+            variablesText: "",
             auth: RequestAuthConfiguration()
         )
     }
     
     func toMySQLRecord() -> MySQLRequestDocumentRecord {
-        MySQLRequestDocumentRecord(
+        let fieldsJSON = Self.serializeResponseFields(responseFields)
+        return MySQLRequestDocumentRecord(
             id: id.uuidString,
             projectID: projectID.uuidString,
             name: name,
@@ -159,19 +175,25 @@ struct RequestDocument: Identifiable, Equatable {
             bodyText: bodyText,
             variablesText: variablesText,
             authType: auth.type.rawValue,
-            authConfig: nil
+            authConfig: nil,
+            responseBody: responseBody,
+            responseHeadersText: responseHeadersText,
+            responseStatusCode: responseStatusCode,
+            responseDuration: responseDuration,
+            responseFieldsJSON: fieldsJSON
         )
     }
-    
+
     static func fromMySQLRecord(_ record: MySQLRequestDocumentRecord) -> RequestDocument? {
         guard let id = UUID(uuidString: record.id),
               let projectID = UUID(uuidString: record.projectID),
               let method = HTTPMethod(rawValue: record.method) else {
             return nil
         }
-        
+
         let authType = RequestAuthType(rawValue: record.authType) ?? .none
-        
+        let responseFields = deserializeResponseFields(record.responseFieldsJSON)
+
         return RequestDocument(
             id: id,
             projectID: projectID,
@@ -184,8 +206,46 @@ struct RequestDocument: Identifiable, Equatable {
             headersText: record.headersText,
             bodyText: record.bodyText,
             variablesText: record.variablesText,
-            auth: RequestAuthConfiguration(type: authType)
+            auth: RequestAuthConfiguration(type: authType),
+            responseBody: record.responseBody,
+            responseHeadersText: record.responseHeadersText,
+            responseStatusCode: record.responseStatusCode,
+            responseDuration: record.responseDuration,
+            responseFields: responseFields
         )
+    }
+
+    static func serializeResponseFields(_ fields: [ResponseFieldInfo]) -> String {
+        let dictArray = fields.map { field in
+            [
+                "fieldName": field.fieldName,
+                "fieldType": field.fieldType,
+                "description": field.description
+            ] as [String: String]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: dictArray),
+              let json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return json
+    }
+
+    static func deserializeResponseFields(_ json: String) -> [ResponseFieldInfo] {
+        guard let data = json.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
+            return []
+        }
+        return array.compactMap { dict in
+            guard let fieldName = dict["fieldName"],
+                  let fieldType = dict["fieldType"] else {
+                return nil
+            }
+            return ResponseFieldInfo(
+                fieldName: fieldName,
+                fieldType: fieldType,
+                description: dict["description"] ?? ""
+            )
+        }
     }
 }
 

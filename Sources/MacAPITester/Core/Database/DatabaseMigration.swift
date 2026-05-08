@@ -41,11 +41,33 @@ final class DatabaseMigration {
                 variables_text TEXT,
                 auth_type VARCHAR(20) DEFAULT 'none',
                 auth_config JSON,
+                response_body LONGTEXT,
+                response_headers_text LONGTEXT,
+                response_status_code INT DEFAULT 0,
+                response_duration DOUBLE DEFAULT 0,
+                response_fields_json LONGTEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             )
         """)
+
+        // 添加新列（如果不存在）
+        let columnsToAdd = [
+            ("response_body", "LONGTEXT"),
+            ("response_headers_text", "LONGTEXT"),
+            ("response_status_code", "INT DEFAULT 0"),
+            ("response_duration", "DOUBLE DEFAULT 0"),
+            ("response_fields_json", "LONGTEXT")
+        ]
+
+        for (column, type) in columnsToAdd {
+            do {
+                try mysqlDatabase.execute("ALTER TABLE request_documents ADD COLUMN \(column) \(type)")
+            } catch {
+                // 列已存在，忽略错误
+            }
+        }
 
         try mysqlDatabase.execute("""
             CREATE TABLE IF NOT EXISTS request_history (
@@ -92,6 +114,30 @@ final class DatabaseMigration {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 INDEX idx_project_id (project_id)
+            )
+        """)
+
+        try mysqlDatabase.execute("""
+            CREATE TABLE IF NOT EXISTS environments (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+
+        try mysqlDatabase.execute("""
+            CREATE TABLE IF NOT EXISTS environment_variables (
+                id VARCHAR(36) PRIMARY KEY,
+                env_id VARCHAR(36) NOT NULL,
+                key_name VARCHAR(255) NOT NULL,
+                value TEXT NOT NULL,
+                enabled TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE,
+                INDEX idx_env_id (env_id)
             )
         """)
     }

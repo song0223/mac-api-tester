@@ -18,11 +18,18 @@ struct AppContainer: View {
     @State private var showingScriptEditor = false
     @State private var showingTestCaseEditor = false
     @State private var showingDocServerSettings = false
+    @State private var showingEnvironmentEditor = false
+    @State private var showingCurlImport = false
+    @State private var showingHistory = false
     @State private var newDocServerPort: Int?
     @State private var cookieJar = CookieJar()
     @State private var scripts: [Script] = []
     @State private var testCases: [TestCase] = []
     @State private var testSuites: [TestSuite] = []
+    @State private var environments: [Environment] = []
+    @State private var activeEnvironmentID: UUID?
+    @State private var historySearchText = ""
+    @State private var responseFields: [ResponseFieldInfo] = []
     private let workspaceBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
 
     private let templateRenderer = TemplateRenderer()
@@ -32,6 +39,7 @@ struct AppContainer: View {
     private var testCaseManager: TestCaseManager
     private var projectRepository: MySQLProjectRepository?
     private var requestDocumentRepository: MySQLRequestDocumentRepository?
+    private var environmentRepository: MySQLEnvironmentRepository?
     private var mysqlDatabase: MySQLDatabase?
     @State private var docServer: DocServer?
 
@@ -53,6 +61,7 @@ struct AppContainer: View {
             self.testCaseManager = TestCaseManager(database: mysqlDatabase)
             self.projectRepository = try MySQLProjectRepository(database: mysqlDatabase)
             self.requestDocumentRepository = try MySQLRequestDocumentRepository(database: mysqlDatabase)
+            self.environmentRepository = try MySQLEnvironmentRepository(database: mysqlDatabase)
             print("仓库初始化完成")
             
             let server = DocServer(database: mysqlDatabase)
@@ -62,7 +71,30 @@ struct AppContainer: View {
             // 从数据库加载数据
             let loadedProjects = try projectRepository?.fetchAllProjects() ?? []
             let allRequestDocuments = try requestDocumentRepository?.fetchAllRequestDocuments() ?? []
-            
+
+            // 加载环境变量
+            let loadedEnvironments = try environmentRepository?.fetchAllEnvironments() ?? []
+            var envs: [Environment] = []
+            for envRecord in loadedEnvironments {
+                let variables = try environmentRepository?.fetchVariables(envId: envRecord.id) ?? []
+                let env = Environment(
+                    id: UUID(uuidString: envRecord.id) ?? UUID(),
+                    name: envRecord.name,
+                    isActive: envRecord.isActive,
+                    variables: variables.map { v in
+                        EnvironmentVariable(
+                            id: UUID(uuidString: v.id) ?? UUID(),
+                            key: v.keyName,
+                            value: v.value,
+                            enabled: v.enabled
+                        )
+                    }
+                )
+                envs.append(env)
+            }
+            _environments = State(initialValue: envs)
+            _activeEnvironmentID = State(initialValue: envs.first(where: { $0.isActive })?.id)
+
             if loadedProjects.isEmpty {
                 // 数据库为空，创建默认项目
                 let initialProject = RequestProject(name: "默认项目")
@@ -80,21 +112,46 @@ struct AppContainer: View {
                 // 从数据库加载
                 let projects = loadedProjects.map { RequestProject(id: UUID(uuidString: $0.id) ?? UUID(), name: $0.name) }
                 let requests = allRequestDocuments.compactMap { RequestDocument.fromMySQLRecord($0) }
-                
+
                 _projects = State(initialValue: projects)
                 _selectedProjectID = State(initialValue: projects.first?.id)
                 _requests = State(initialValue: requests)
                 _openedRequestIDs = State(initialValue: Array(requests.prefix(5).map { $0.id }))
                 _selectedRequestID = State(initialValue: requests.first?.id)
+                _responseFields = State(initialValue: requests.first?.responseFields ?? [])
+
+                // 加载第一个请求的响应状态
+                if let firstRequest = requests.first {
+                    if firstRequest.responseStatusCode > 0 {
+                        _latestResponse = State(initialValue: RequestResponseSnapshot(
+                            statusCode: firstRequest.responseStatusCode,
+                            duration: firstRequest.responseDuration,
+                            headersText: firstRequest.responseHeadersText,
+                            bodyText: firstRequest.responseBody,
+                            timestamp: Date()
+                        ))
+                    } else if !firstRequest.responseBody.isEmpty {
+                        _latestResponse = State(initialValue: RequestResponseSnapshot(
+                            statusCode: 0,
+                            duration: 0,
+                            headersText: firstRequest.responseHeadersText,
+                            bodyText: firstRequest.responseBody,
+                            timestamp: Date()
+                        ))
+                    }
+                }
             }
         } catch {
             print("MySQL初始化失败，使用内存存储: \(error)")
             self.mysqlDatabase = nil
             self.projectRepository = nil
             self.requestDocumentRepository = nil
+            self.environmentRepository = nil
             self.historyPersistence = HistoryPersistence.inMemory
             self.testCaseManager = TestCaseManager()
             _docServer = State(initialValue: nil)
+            _environments = State(initialValue: [])
+            _activeEnvironmentID = State(initialValue: nil)
 
             // 使用默认数据
             let initialProject = RequestProject(name: "默认项目")
@@ -132,7 +189,7 @@ struct AppContainer: View {
                         Divider()
 
                         ScrollView(.vertical) {
-                            VStack(spacing: 0) {
+                            VStack(spacing: 4) {
                                 RequestEditorView(
                                     request: requestBinding,
                                     isSending: isSending,
@@ -141,12 +198,27 @@ struct AppContainer: View {
                                     showInlineRunButton: false
                                 )
 
-                                Divider()
-
                                 ResponseViewerView(
                                     response: latestResponse,
                                     historyItems: historyItems,
-                                    errorMessage: errorMessage
+                                    errorMessage: errorMessage,
+                                    historySearchText: $historySearchText,
+                                    responseFields: $responseFields,
+                                    onHistorySearch: { loadHistory() },
+                                    onFieldsChanged: { syncResponseFieldsToDatabase() },
+                                    onResponseBodyChanged: { newBody in
+                                        if let selectedRequestIndex {
+                                            requests[selectedRequestIndex].responseBody = newBody
+                                            latestResponse = RequestResponseSnapshot(
+                                                statusCode: requests[selectedRequestIndex].responseStatusCode,
+                                                duration: requests[selectedRequestIndex].responseDuration,
+                                                headersText: requests[selectedRequestIndex].responseHeadersText,
+                                                bodyText: newBody,
+                                                timestamp: Date()
+                                            )
+                                            syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
+                                        }
+                                    }
                                 )
                             }
                             .frame(maxWidth: .infinity, alignment: .top)
@@ -187,11 +259,43 @@ struct AppContainer: View {
             if let ownerProjectID = requests.first(where: { $0.id == newValue })?.projectID {
                 selectedProjectID = ownerProjectID
             }
+            // 加载选中请求的响应状态和参数说明
+            if let request = requests.first(where: { $0.id == newValue }) {
+                responseFields = request.responseFields
+                if request.responseStatusCode > 0 {
+                    latestResponse = RequestResponseSnapshot(
+                        statusCode: request.responseStatusCode,
+                        duration: request.responseDuration,
+                        headersText: request.responseHeadersText,
+                        bodyText: request.responseBody,
+                        timestamp: Date()
+                    )
+                } else if !request.responseBody.isEmpty {
+                    latestResponse = RequestResponseSnapshot(
+                        statusCode: 0,
+                        duration: 0,
+                        headersText: request.responseHeadersText,
+                        bodyText: request.responseBody,
+                        timestamp: Date()
+                    )
+                } else {
+                    latestResponse = nil
+                }
+            }
         }
         .onChange(of: selectedProjectID) { _, newValue in
             guard let projectID = newValue else { return }
-            guard let selectedRequestID,
-                  requests.contains(where: { $0.id == selectedRequestID && $0.projectID == projectID }) else {
+
+            // 清空标签页，只保留新项目的接口
+            openedRequestIDs = openedRequestIDs.filter { id in
+                requests.contains(where: { $0.id == id && $0.projectID == projectID })
+            }
+
+            // 如果当前选中的接口不属于新项目，切换到新项目的第一个接口
+            if let selectedRequestID,
+               requests.contains(where: { $0.id == selectedRequestID && $0.projectID == projectID }) {
+                // 当前接口属于新项目，保持不变
+            } else {
                 let fallback = requests.first(where: { $0.projectID == projectID })
                 self.selectedRequestID = fallback?.id
                 if let fallback {
@@ -199,8 +303,8 @@ struct AppContainer: View {
                 } else {
                     latestResponse = nil
                     errorMessage = nil
+                    responseFields = []
                 }
-                return
             }
         }
         .onChange(of: statusMessage) { _, newValue in
@@ -225,22 +329,28 @@ struct AppContainer: View {
                         Text(request.name)
                             .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                             .lineLimit(1)
-
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
                         Button {
                             closeRequestTab(request.id)
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.plain)
+                        .pointingHandCursor()
                     }
+                    .frame(minWidth: 80, maxWidth: 180)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
+                    .contentShape(Rectangle())
                     .onTapGesture {
                         selectedRequestID = request.id
                     }
+                    .pointingHandCursor()
                 }
             }
         }
@@ -252,14 +362,31 @@ struct AppContainer: View {
             statusAndNameRow(request: request)
                 .frame(width: 300)
 
-            simpleInput(text: request.descriptionText, placeholder: "(选填) 请输入接口描述")
+            descriptionInput(text: request.descriptionText, placeholder: "(选填) 请输入接口描述")
 
             Divider()
                 .frame(height: 28)
 
-            Image(systemName: "clock")
-                .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
+            Button(action: {
+                copyAsCurl(request.wrappedValue)
+            }) {
+                Image(systemName: "doc.on.doc")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .help("复制为 cURL 命令")
+
+            Button(action: {
+                showingHistory = true
+            }) {
+                Image(systemName: "clock")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .help("查看历史记录")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -267,115 +394,100 @@ struct AppContainer: View {
     }
 
     private func statusAndNameRow(request: Binding<RequestDocument>) -> some View {
-        HStack(spacing: 0) {
-            TextField("接口名称", text: request.name)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14, weight: .semibold))
-                .padding(.horizontal, 14)
-                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-        }
-        .background(
-            Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
+        TextField("接口名称", text: request.name)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14, weight: .semibold))
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
+            .background(
+                Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
     }
 
-    private func simpleInput(text: Binding<String>, placeholder: String, minWidth: CGFloat = 160) -> some View {
-        inputContainer(minWidth: minWidth) {
-            TextField(placeholder, text: text)
-                .textFieldStyle(.plain)
-        }
-    }
-
-    private func inputContainer<Content: View>(minWidth: CGFloat, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 0) {
-            content()
-        }
-        .padding(.horizontal, 12)
-        .frame(minWidth: minWidth, minHeight: 36)
-        .background(
-            Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
+    private func descriptionInput(text: Binding<String>, placeholder: String) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
+            .background(
+                Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
     }
 
     private var bottomActionBar: some View {
-        HStack(spacing: 8) {
-            // 核心操作按钮组
-            Button("保存") {
-                saveCurrentDraft()
-            }
-            .frame(width: 100, height: 40)
-            .font(.system(size: 14, weight: .semibold))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+        HStack(spacing: 12) {
+            // 左侧：核心操作
+            HStack(spacing: 6) {
+                toolButton(icon: "square.and.arrow.down", label: "保存", action: saveCurrentDraft)
+                toolButton(icon: "doc.text", label: "文档", action: generateDocument)
 
-            Button("生成文档") {
-                generateDocument()
+                Button(action: triggerSend) {
+                    HStack(spacing: 6) {
+                        if isSending {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11))
+                        }
+                        Text(isSending ? "调试中" : "运行调试")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.accentColor, in: Capsule())
+                    .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .disabled(isSending || selectedRequestBinding == nil)
             }
-            .frame(width: 100, height: 40)
-            .font(.system(size: 14, weight: .semibold))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            Button(isSending ? "调试中..." : "运行调试") {
-                triggerSend()
-            }
-            .frame(width: 120, height: 40)
-            .font(.system(size: 14, weight: .semibold))
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(isSending || selectedRequestBinding == nil)
 
             Divider()
-                .frame(height: 24)
+                .frame(height: 20)
 
-            // 工具按钮组
-            Button("Cookies") {
-                showingCookiesEditor = true
+            // 中间：工具按钮
+            HStack(spacing: 4) {
+                toolButton(icon: "lock.shield", label: "Cookies", action: { showingCookiesEditor = true })
+                toolButton(icon: "terminal", label: "脚本", action: { showingScriptEditor = true })
+                toolButton(icon: "checklist", label: "用例", action: { showingTestCaseEditor = true })
+                toolButton(icon: "doc.richtext", label: "文档设置", action: { showingDocServerSettings = true })
+                toolButton(icon: "slider.horizontal.3", label: "环境", action: { showingEnvironmentEditor = true })
+                toolButton(icon: "square.and.arrow.up", label: "cURL", action: { showingCurlImport = true })
             }
-            .frame(width: 80, height: 40)
-            .font(.system(size: 13, weight: .medium))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
 
-            Button("脚本") {
-                showingScriptEditor = true
-            }
-            .frame(width: 60, height: 40)
-            .font(.system(size: 13, weight: .medium))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            Spacer()
 
-            Button("测试用例") {
-                showingTestCaseEditor = true
+            // 右侧：当前环境标签
+            if let activeEnv = environments.first(where: { $0.id == activeEnvironmentID }) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 6, height: 6)
+                    Text(activeEnv.name)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.green.opacity(0.1), in: Capsule())
+                .foregroundStyle(.green)
             }
-            .frame(width: 80, height: 40)
-            .font(.system(size: 13, weight: .medium))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            Button("文档设置") {
-                showingDocServerSettings = true
-            }
-            .frame(width: 80, height: 40)
-            .font(.system(size: 13, weight: .medium))
-            .buttonStyle(.bordered)
-            .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(workspaceBackground)
+        .padding(.vertical, 10)
+        .background(.bar)
         .sheet(isPresented: $showingCookiesEditor) {
             CookiesEditorView(
                 cookieJar: $cookieJar,
@@ -409,6 +521,32 @@ struct AppContainer: View {
                 }
             )
         }
+        .sheet(isPresented: $showingEnvironmentEditor) {
+            EnvironmentEditorView(
+                environments: $environments,
+                activeEnvironmentID: $activeEnvironmentID,
+                onSave: { syncEnvironmentsToDatabase() }
+            )
+        }
+        .sheet(isPresented: $showingCurlImport) {
+            CurlImportView(
+                onImport: { result in
+                    importCurlResult(result)
+                    showingCurlImport = false
+                },
+                onCancel: {
+                    showingCurlImport = false
+                }
+            )
+        }
+        .sheet(isPresented: $showingHistory) {
+            HistoryView(
+                historyItems: historyItems,
+                historySearchText: $historySearchText,
+                onSearch: { loadHistory() },
+                onDismiss: { showingHistory = false }
+            )
+        }
         .onChange(of: newDocServerPort) { _, newPort in
             guard let newPort else { return }
             docServer?.stop()
@@ -421,6 +559,22 @@ struct AppContainer: View {
 
     private var selectedRequestIndex: Int? {
         requests.firstIndex(where: { $0.id == selectedRequestID })
+    }
+
+    private func toolButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.5), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointingHandCursor()
     }
 
     private var openedRequests: [RequestDocument] {
@@ -631,12 +785,107 @@ struct AppContainer: View {
     
     private func syncRequestDeletion(_ id: RequestDocument.ID) {
         guard let requestDocumentRepository else { return }
-        
+
         do {
             try requestDocumentRepository.deleteRequestDocument(id: id.uuidString)
         } catch {
             print("从数据库删除请求失败: \(error)")
         }
+    }
+
+    private func syncResponseFieldsToDatabase() {
+        guard let selectedRequestIndex else { return }
+        requests[selectedRequestIndex].responseFields = responseFields
+        syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
+    }
+
+    private func syncEnvironmentsToDatabase() {
+        guard let environmentRepository else { return }
+
+        do {
+            // 获取数据库中现有的环境
+            let existingEnvs = try environmentRepository.fetchAllEnvironments()
+            let existingEnvIDs = Set(existingEnvs.map { $0.id })
+            let currentEnvIDs = Set(environments.map { $0.id.uuidString })
+
+            // 删除不再存在的环境
+            for envID in existingEnvIDs where !currentEnvIDs.contains(envID) {
+                try environmentRepository.deleteEnvironment(id: envID)
+            }
+
+            // 创建或更新环境
+            for env in environments {
+                let envID = env.id.uuidString
+                if existingEnvIDs.contains(envID) {
+                    try environmentRepository.updateEnvironment(id: envID, name: env.name, isActive: env.isActive)
+                } else {
+                    try environmentRepository.createEnvironment(id: envID, name: env.name, isActive: env.isActive)
+                }
+
+                // 同步环境变量
+                let existingVars = try environmentRepository.fetchVariables(envId: envID)
+                let existingVarIDs = Set(existingVars.map { $0.id })
+                let currentVarIDs = Set(env.variables.map { $0.id.uuidString })
+
+                // 删除不再存在的变量
+                for varID in existingVarIDs where !currentVarIDs.contains(varID) {
+                    try environmentRepository.deleteVariable(id: varID)
+                }
+
+                // 创建或更新变量
+                for variable in env.variables {
+                    let varID = variable.id.uuidString
+                    if existingVarIDs.contains(varID) {
+                        try environmentRepository.updateVariable(id: varID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
+                    } else {
+                        try environmentRepository.createVariable(id: varID, envId: envID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
+                    }
+                }
+            }
+        } catch {
+            print("同步环境变量到数据库失败: \(error)")
+        }
+    }
+
+    private func importCurlResult(_ result: CurlParseResult) {
+        guard let selectedProjectID else { return }
+
+        // 构建 headers 文本
+        var headersText = ""
+        for (key, value) in result.headers {
+            headersText += "\(key): \(value)\n"
+        }
+
+        // 创建新的请求文档
+        let newRequest = RequestDocument(
+            projectID: selectedProjectID,
+            name: "从 cURL 导入",
+            method: result.method,
+            urlString: result.url,
+            headersText: headersText,
+            bodyText: result.body ?? ""
+        )
+
+        // 添加到请求列表
+        requests.append(newRequest)
+        openedRequestIDs.append(newRequest.id)
+        selectedRequestID = newRequest.id
+
+        // 同步到数据库
+        syncRequestToDatabase(newRequest, isNew: true)
+
+        statusMessage = "已从 cURL 导入请求"
+    }
+
+    private func copyAsCurl(_ document: RequestDocument) {
+        let exporter = CurlExporter()
+        let curl = exporter.export(document)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(curl, forType: .string)
+
+        statusMessage = "已复制 cURL 命令到剪贴板"
     }
 
     @MainActor
@@ -667,7 +916,17 @@ struct AppContainer: View {
         let requestDocument = requests[selectedRequestIndex]
 
         do {
-            let variables = try parseVariables(from: requestDocument.variablesText)
+            var variables = try parseVariables(from: requestDocument.variablesText)
+
+            // 合并环境变量（环境变量优先级低于请求级变量）
+            if let envID = activeEnvironmentID,
+               let env = environments.first(where: { $0.id == envID }) {
+                for v in env.variables where v.enabled && !v.key.isEmpty {
+                    if variables[v.key] == nil {
+                        variables[v.key] = v.value
+                    }
+                }
+            }
             let urlRequest = try buildRequest(from: requestDocument, variables: variables)
             let response = try await httpClient.send(urlRequest)
             let snapshot = RequestResponseSnapshot(
@@ -680,6 +939,17 @@ struct AppContainer: View {
 
             latestResponse = snapshot
             persistHistory(for: requestDocument, request: urlRequest, response: snapshot)
+
+            // 保存响应内容到请求文档
+            requests[selectedRequestIndex].responseBody = snapshot.bodyText
+            requests[selectedRequestIndex].responseHeadersText = snapshot.headersText
+            requests[selectedRequestIndex].responseStatusCode = snapshot.statusCode
+            requests[selectedRequestIndex].responseDuration = snapshot.duration
+            syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
+
+            // 重新生成文档
+            generateDocumentation()
+
             statusMessage = "调试完成：\(response.statusCode) (\(Int((response.duration * 1000).rounded()))ms)"
         } catch {
             errorMessage = readableErrorMessage(from: error)
@@ -1005,7 +1275,7 @@ struct AppContainer: View {
     ) {
         let message = historyMessage(for: requestDocument, request: request, response: response)
         historyPersistence.save(message: message, createdAt: response.timestamp)
-        historyItems = historyPersistence.loadItems()
+        loadHistory()
     }
 
     private func historyMessage(
@@ -1024,7 +1294,12 @@ struct AppContainer: View {
         }
 
         hasLoadedHistory = true
-        historyItems = historyPersistence.loadItems()
+        loadHistory()
+    }
+
+    private func loadHistory() {
+        let search = historySearchText.isEmpty ? nil : historySearchText
+        historyItems = historyPersistence.loadItems(search: search)
     }
 
     private func readableErrorMessage(from error: Error) -> String {
@@ -1134,6 +1409,27 @@ private final class HistoryPersistence {
 
         do {
             let records = try repository.fetchHistory()
+            return records
+                .reversed()
+                .map { record in
+                    RequestHistoryItem(
+                        timestamp: record.createdAt,
+                        message: record.message
+                    )
+                }
+        } catch {
+            print("加载历史记录失败: \(error)")
+            return []
+        }
+    }
+
+    func loadItems(search: String?) -> [RequestHistoryItem] {
+        guard let repository else {
+            return []
+        }
+
+        do {
+            let records = try repository.fetchHistory(search: search)
             return records
                 .reversed()
                 .map { record in

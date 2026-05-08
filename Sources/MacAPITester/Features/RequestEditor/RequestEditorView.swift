@@ -37,7 +37,7 @@ private struct BodyParamRow: Identifiable, Equatable {
         name: String = "",
         value: String = "",
         type: String = "string",
-        required: Bool = false,
+        required: Bool = true,
         description: String = ""
     ) {
         self.id = id
@@ -50,7 +50,7 @@ private struct BodyParamRow: Identifiable, Equatable {
     }
 }
 
-private struct QueryParamRow: Identifiable, Equatable {
+struct QueryParamRow: Identifiable, Equatable {
     let id: UUID
     var enabled: Bool
     var name: String
@@ -63,7 +63,7 @@ private struct QueryParamRow: Identifiable, Equatable {
         enabled: Bool = true,
         name: String = "",
         value: String = "",
-        required: Bool = false,
+        required: Bool = true,
         description: String = ""
     ) {
         self.id = id
@@ -96,7 +96,7 @@ struct RequestEditorView: View {
     let onSend: () -> Void
     let showInlineRunButton: Bool
 
-    @State private var selectedTab: RequestParamTab = .body
+    @State private var selectedTab: RequestParamTab
     @State private var bodyMode: BodyMode = .formData
     @State private var bodyRows: [BodyParamRow] = [BodyParamRow()]
     @State private var queryRows: [QueryParamRow] = [QueryParamRow()]
@@ -106,6 +106,7 @@ struct RequestEditorView: View {
     @State private var draggingQueryRowID: UUID?
     @State private var draggingHeaderRowID: UUID?
     @State private var showingImportExport = false
+    @State private var showingQueryImportExport = false
     private let panelBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
 
     init(
@@ -120,6 +121,8 @@ struct RequestEditorView: View {
         self.errorMessage = errorMessage
         self.onSend = onSend
         self.showInlineRunButton = showInlineRunButton
+        // 根据请求方法设置默认标签
+        _selectedTab = State(initialValue: request.wrappedValue.method == .get ? .query : .body)
     }
 
     var body: some View {
@@ -128,7 +131,6 @@ struct RequestEditorView: View {
             requestParamsPanel
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
         .background(panelBackground)
         .onAppear(perform: syncRowsFromRequest)
         .onChange(of: request.id) { _, _ in
@@ -141,6 +143,8 @@ struct RequestEditorView: View {
         .onChange(of: queryRows) { _, _ in
             guard !syncingFromRequest else { return }
             request.queryText = serializeQueryRows(queryRows)
+            // 将 query 参数同步到 URL
+            syncQueryToURL()
         }
         .onChange(of: headerRows) { _, _ in
             guard !syncingFromRequest else { return }
@@ -198,21 +202,17 @@ struct RequestEditorView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 8) {
-                        Text(request.method.rawValue)
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(request.method == .post ? Color.orange.opacity(0.2) : Color.green.opacity(0.2), in: Capsule())
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(width: 100, height: 40, alignment: .leading)
-                    .contentShape(Rectangle())
+                    Text(request.method.rawValue)
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(request.method == .post ? Color.orange.opacity(0.2) : Color.green.opacity(0.2))
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
+                .frame(width: 120, height: 40)
+                .contentShape(Rectangle())
+                .pointingHandCursor()
 
                 Divider()
                     .frame(height: 24)
@@ -222,6 +222,10 @@ struct RequestEditorView: View {
                     .font(.system(.body, design: .monospaced))
                     .padding(.horizontal, 14)
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                    .onChange(of: request.urlString) { _, _ in
+                        guard !syncingFromRequest else { return }
+                        syncURLToQuery()
+                    }
 
                 if showInlineRunButton {
                     Button(action: onSend) {
@@ -285,6 +289,7 @@ struct RequestEditorView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .pointingHandCursor()
                 }
                 Spacer()
             }
@@ -321,6 +326,7 @@ struct RequestEditorView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .pointingHandCursor()
                     .disabled(isSending || request.urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal, 12)
@@ -341,9 +347,8 @@ struct RequestEditorView: View {
                     Text(mode.rawValue).tag(mode)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: 180)
+            .pillPickerStyle()
+            .frame(width: 200)
 
             if bodyMode == .raw {
                 textEditorPanel(
@@ -357,7 +362,7 @@ struct RequestEditorView: View {
                         tableHeaderCell("状态", width: 70)
                         tableHeaderFlexibleCell("参数名")
                         tableHeaderFlexibleCell("参数值")
-                        tableHeaderCell("类型", width: 90)
+                        tableHeaderCell("类型", width: 120)
                         tableHeaderCell("必填", width: 80)
                         tableHeaderFlexibleCell("参数描述")
                         tableHeaderCell("操作", width: 110)
@@ -372,33 +377,34 @@ struct RequestEditorView: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .scaleEffect(0.8)
+                                    .pointingHandCursor()
                             }
                             tableFlexibleCell {
                                 TextField("", text: $row.name)
-                                    .textFieldStyle(.plain)
+                                    .inputFieldStyle()
                             }
                             tableFlexibleCell {
                                 TextField("", text: $row.value)
-                                    .textFieldStyle(.plain)
+                                    .inputFieldStyle()
                             }
-                            tableCell(width: 90) {
+                            tableCell(width: 120) {
                                 Picker("", selection: $row.type) {
                                     Text("string").tag("string")
                                     Text("number").tag("number")
                                     Text("boolean").tag("boolean")
                                 }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
+                                .pillPickerStyle()
                             }
                             tableCell(width: 80) {
                                 Toggle("", isOn: $row.required)
                                     .labelsHidden()
-                                .toggleStyle(.switch)
-                                .scaleEffect(0.8)
+                                    .toggleStyle(.switch)
+                                    .scaleEffect(0.8)
+                                    .pointingHandCursor()
                             }
                             tableFlexibleCell {
                                 TextField("(选填) 请输入详细的描述", text: $row.description)
-                                    .textFieldStyle(.plain)
+                                    .inputFieldStyle()
                                     .foregroundStyle(.secondary)
                             }
                             tableCell(width: 110) {
@@ -408,7 +414,7 @@ struct RequestEditorView: View {
                                 )
                             }
                         }
-                        .frame(height: 46)
+                        .frame(height: 38)
                         .overlay(Divider(), alignment: .bottom)
                         .onDrop(
                             of: [UTType.text],
@@ -428,12 +434,14 @@ struct RequestEditorView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    .pointingHandCursor()
                     Button {
                         bodyRows.append(BodyParamRow())
                     } label: {
                         Label("增加行", systemImage: "plus")
                     }
                     .buttonStyle(.plain)
+                    .pointingHandCursor()
                 }
                 .font(.system(size: 13, weight: .medium))
             }
@@ -461,24 +469,26 @@ struct RequestEditorView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .scaleEffect(0.8)
+                                .pointingHandCursor()
                         }
                         tableFlexibleCell {
                             TextField("key", text: $row.name)
-                                .textFieldStyle(.plain)
+                                .inputFieldStyle()
                         }
                         tableFlexibleCell {
                             TextField("value", text: $row.value)
-                                .textFieldStyle(.plain)
+                                .inputFieldStyle()
                         }
                         tableCell(width: 80) {
                             Toggle("", isOn: $row.required)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .scaleEffect(0.8)
+                                .pointingHandCursor()
                         }
                         tableFlexibleCell {
                             TextField("(选填) 参数说明", text: $row.description)
-                                .textFieldStyle(.plain)
+                                .inputFieldStyle()
                                 .foregroundStyle(.secondary)
                         }
                         tableCell(width: 110) {
@@ -488,7 +498,7 @@ struct RequestEditorView: View {
                             )
                         }
                     }
-                    .frame(height: 46)
+                    .frame(height: 38)
                     .overlay(Divider(), alignment: .bottom)
                     .onDrop(
                         of: [UTType.text],
@@ -503,15 +513,32 @@ struct RequestEditorView: View {
 
             HStack {
                 Spacer()
+                Button("导入导出") {
+                    showQueryImportExport()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .pointingHandCursor()
                 Button {
                     queryRows.append(QueryParamRow())
                 } label: {
                     Label("增加行", systemImage: "plus")
                 }
                 .buttonStyle(.plain)
+                .pointingHandCursor()
             }
             .font(.system(size: 13, weight: .medium))
         }
+        .sheet(isPresented: $showingQueryImportExport) {
+            QueryImportExportView(
+                queryRows: $queryRows,
+                onDismiss: { showingQueryImportExport = false }
+            )
+        }
+    }
+
+    private func showQueryImportExport() {
+        showingQueryImportExport = true
     }
 
     private var headersTablePanel: some View {
@@ -536,11 +563,11 @@ struct RequestEditorView: View {
                         }
                         tableFlexibleCell {
                             TextField("Header 名，例如 Authorization", text: $row.name)
-                                .textFieldStyle(.plain)
+                                .inputFieldStyle()
                         }
                         tableFlexibleCell {
                             TextField("Header 值", text: $row.value)
-                                .textFieldStyle(.plain)
+                                .inputFieldStyle()
                         }
                         tableCell(width: 100) {
                             rowActions(
@@ -549,7 +576,7 @@ struct RequestEditorView: View {
                             )
                         }
                     }
-                    .frame(height: 46)
+                    .frame(height: 38)
                     .overlay(Divider(), alignment: .bottom)
                     .onDrop(
                         of: [UTType.text],
@@ -612,7 +639,7 @@ struct RequestEditorView: View {
     private func tableCell<Content: View>(width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
         content()
             .padding(.horizontal, 10)
-            .frame(width: width, height: 46, alignment: .leading)
+            .frame(width: width, height: 38, alignment: .leading)
             .overlay(Divider(), alignment: .trailing)
     }
 
@@ -627,7 +654,7 @@ struct RequestEditorView: View {
     private func tableFlexibleCell<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
             .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 38, alignment: .leading)
             .overlay(Divider(), alignment: .trailing)
     }
 
@@ -638,7 +665,7 @@ struct RequestEditorView: View {
                     Text(authType.rawValue).tag(authType)
                 }
             }
-            .pickerStyle(.segmented)
+            .pillPickerStyle()
 
             switch request.auth.type {
             case .none:
@@ -647,17 +674,17 @@ struct RequestEditorView: View {
                     .foregroundStyle(.secondary)
             case .bearer:
                 TextField("Bearer Token", text: $request.auth.bearerToken)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
             case .basic:
                 TextField("Username", text: $request.auth.basicUsername)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
                 SecureField("Password", text: $request.auth.basicPassword)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
             case .apiKey:
                 TextField("Header Name", text: $request.auth.apiKeyHeader)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
                 TextField("Header Value", text: $request.auth.apiKeyValue)
-                    .textFieldStyle(.roundedBorder)
+                    .inputFieldStyle()
             }
         }
     }
@@ -788,6 +815,66 @@ struct RequestEditorView: View {
             .filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map { "\($0.name): \($0.value)" }
             .joined(separator: "\n")
+    }
+
+    /// 将 URL 中的查询参数同步到 query 表格
+    private func syncURLToQuery() {
+        let urlString = request.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: urlString),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems, !queryItems.isEmpty else {
+            return
+        }
+
+        syncingFromRequest = true
+        defer { syncingFromRequest = false }
+
+        // 收集 URL 中的参数
+        var urlParams: [(key: String, value: String)] = []
+        for item in queryItems {
+            urlParams.append((key: item.name, value: item.value ?? ""))
+        }
+
+        // 合并：保留已有描述，新的从 URL 来
+        let existingMap = Dictionary(uniqueKeysWithValues: queryRows.filter { !$0.name.isEmpty }.map { ($0.name, $0) })
+        var merged: [QueryParamRow] = []
+        for param in urlParams {
+            if let existing = existingMap[param.key] {
+                merged.append(QueryParamRow(
+                    id: existing.id,
+                    enabled: existing.enabled,
+                    name: param.key,
+                    value: param.value,
+                    required: existing.required,
+                    description: existing.description
+                ))
+            } else {
+                merged.append(QueryParamRow(name: param.key, value: param.value))
+            }
+        }
+
+        if merged.isEmpty {
+            queryRows = [QueryParamRow()]
+        } else {
+            queryRows = merged
+        }
+    }
+
+    /// 将 query 表格参数同步到 URL
+    private func syncQueryToURL() {
+        let urlString = request.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: urlString) else { return }
+
+        let enabledParams = queryRows.filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if enabledParams.isEmpty {
+            components.queryItems = nil
+        } else {
+            components.queryItems = enabledParams.map { URLQueryItem(name: $0.name, value: $0.value) }
+        }
+
+        if let newURL = components.url?.absoluteString {
+            request.urlString = newURL
+        }
     }
 }
 

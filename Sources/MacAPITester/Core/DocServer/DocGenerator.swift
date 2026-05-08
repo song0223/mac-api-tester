@@ -31,6 +31,14 @@ enum DocGenerator {
             bodyParams = parseLines(from: request.bodyText, separator: "=")
         }
 
+        let responseFields = request.responseFields.map { field in
+            ResponseFieldDoc(
+                fieldName: field.fieldName,
+                fieldType: field.fieldType,
+                description: field.description
+            )
+        }
+
         return APIDocSection(
             id: request.id.uuidString,
             name: request.name,
@@ -42,7 +50,8 @@ enum DocGenerator {
             headers: headers,
             bodyParams: bodyParams,
             requestBody: request.bodyText.isEmpty ? nil : request.bodyText,
-            responseBody: nil,
+            responseBody: request.responseBody.isEmpty ? nil : request.responseBody,
+            responseFields: responseFields,
             variables: parseVariables(from: request.variablesText)
         )
     }
@@ -61,9 +70,13 @@ enum DocGenerator {
                 let parts = line.split(separator: separator, maxSplits: 1)
                 guard parts.count == 2 else { return nil }
 
+                let name = String(parts[0]).trimmingCharacters(in: .whitespaces)
+                let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
+
                 return ParamInfo(
-                    name: String(parts[0]).trimmingCharacters(in: .whitespaces),
+                    name: name,
                     type: "string",
+                    example: value,
                     required: true,
                     description: ""
                 )
@@ -92,16 +105,6 @@ enum DocGenerator {
         lines.append("")
         lines.append("> 生成时间：\(dateFormatter.string(from: model.generatedAt))")
         lines.append("")
-        lines.append("## 目录")
-        lines.append("")
-
-        for section in model.sections {
-            lines.append("- [\(section.name)](#\(section.id))")
-        }
-
-        lines.append("")
-        lines.append("---")
-        lines.append("")
 
         for section in model.sections {
             lines.append(renderSection(section))
@@ -115,7 +118,7 @@ enum DocGenerator {
     private static func renderSection(_ section: APIDocSection) -> String {
         var lines: [String] = []
 
-        lines.append("## \(section.name)")
+        lines.append("## \(section.method) \(section.name)")
         lines.append("")
         lines.append("**URL:** `\(section.method) \(section.url)`")
         lines.append("")
@@ -131,10 +134,10 @@ enum DocGenerator {
         if !section.queryParams.isEmpty {
             lines.append("### 请求参数")
             lines.append("")
-            lines.append("| 参数名 | 类型 | 必填 | 描述 |")
-            lines.append("|--------|------|------|------|")
+            lines.append("| 参数名 | 类型 | 示例值 | 必填 | 描述 |")
+            lines.append("|--------|------|--------|------|------|")
             for param in section.queryParams {
-                lines.append("| \(param.name) | \(param.type) | \(param.required ? "是" : "否") | \(param.description) |")
+                lines.append("| \(param.name) | \(param.type) | \(param.example) | \(param.required ? "是" : "否") | \(param.description) |")
             }
             lines.append("")
         }
@@ -150,14 +153,17 @@ enum DocGenerator {
             lines.append("")
         }
 
-        if let body = section.requestBody, !body.isEmpty {
-            lines.append("### 请求示例")
-            lines.append("")
-            lines.append("```json")
-            lines.append(body)
-            lines.append("```")
-            lines.append("")
+        // Body 参数表格
+        lines.append("### Body 参数")
+        lines.append("")
+        lines.append("| 参数名 | 类型 | 示例值 | 必填 | 描述 |")
+        lines.append("|--------|------|--------|------|------|")
+        if !section.bodyParams.isEmpty {
+            for param in section.bodyParams {
+                lines.append("| \(param.name) | \(param.type) | \(param.example) | \(param.required ? "是" : "否") | \(param.description) |")
+            }
         }
+        lines.append("")
 
         if let response = section.responseBody, !response.isEmpty {
             lines.append("### 响应示例")
@@ -168,13 +174,13 @@ enum DocGenerator {
             lines.append("")
         }
 
-        if !section.variables.isEmpty {
-            lines.append("### 环境变量")
+        if !section.responseFields.isEmpty {
+            lines.append("### 响应字段说明")
             lines.append("")
-            lines.append("| 变量名 | 示例值 |")
-            lines.append("|--------|--------|")
-            for (key, value) in section.variables {
-                lines.append("| \(key) | \(value) |")
+            lines.append("| 字段名 | 类型 | 描述 |")
+            lines.append("|--------|------|------|")
+            for field in section.responseFields {
+                lines.append("| \(field.fieldName) | \(field.fieldType) | \(field.description) |")
             }
             lines.append("")
         }

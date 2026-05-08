@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql -u root -p\"your_password\" -e \"SELECT LEFT\\(html_content, 2000\\) as html_preview FROM api_documents ORDER BY updated_at DESC LIMIT 1;\")",
+      "Bash(swift build *)",
+      "Bash(mysql -u root -D api_tester -e \"SELECT id, name, query_text, headers_text, body_text, variables_text FROM request_documents WHERE id LIKE '%540A2E9C%' OR project_id LIKE '%540A2E9C%' LIMIT 5;\")"
+    ]
+  }
+}

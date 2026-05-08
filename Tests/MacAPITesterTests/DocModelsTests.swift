@@ -41,10 +41,11 @@ struct DocModelsTests {
         let param = ParamInfo(
             name: "page",
             type: "number",
+            example: "1",
             required: false,
             description: "页码"
         )
-        
+
         #expect(param.name == "page")
         #expect(param.type == "number")
         #expect(!param.required)

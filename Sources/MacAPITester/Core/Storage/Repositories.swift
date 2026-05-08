@@ -330,6 +330,32 @@ final class MySQLHistoryRepository: MySQLRepository {
             return MySQLHistoryRecord(id: id, message: message, createdAt: createdAt)
         }
     }
+
+    func fetchHistory(search: String?) throws -> [MySQLHistoryRecord] {
+        guard let search, !search.isEmpty else {
+            return try fetchHistory()
+        }
+
+        let rows = try database.query(
+            "SELECT id, message, created_at FROM request_history WHERE message LIKE ? ORDER BY created_at ASC",
+            parameters: [.string("%\(search)%")]
+        )
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String,
+                  let message = row["message"] as? String else {
+                return nil
+            }
+
+            let createdAt: Date
+            if let dateString = row["created_at"] as? String {
+                createdAt = Self.dateFormatter.date(from: dateString) ?? Date()
+            } else {
+                createdAt = Date()
+            }
+
+            return MySQLHistoryRecord(id: id, message: message, createdAt: createdAt)
+        }
+    }
 }
 
 // MARK: - 项目仓库
@@ -418,6 +444,11 @@ struct MySQLRequestDocumentRecord: Equatable {
     let variablesText: String
     let authType: String
     let authConfig: String?
+    let responseBody: String
+    let responseHeadersText: String
+    let responseStatusCode: Int
+    let responseDuration: Double
+    let responseFieldsJSON: String
 }
 
 final class MySQLRequestDocumentRepository: MySQLRepository {
@@ -428,11 +459,11 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
 
     func createRequestDocument(_ document: MySQLRequestDocumentRecord) throws {
         let sql = """
-            INSERT INTO request_documents 
-            (id, project_id, name, api_status, description, method, url_string, query_text, headers_text, body_text, variables_text, auth_type, auth_config) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO request_documents
+            (id, project_id, name, api_status, description, method, url_string, query_text, headers_text, body_text, variables_text, auth_type, auth_config, response_body, response_headers_text, response_status_code, response_duration, response_fields_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-        
+
         let parameters: [MySQLValue] = [
             .string(document.id),
             .string(document.projectID),
@@ -446,19 +477,25 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
             .string(document.bodyText),
             .string(document.variablesText),
             .string(document.authType),
-            document.authConfig.map { .string($0) } ?? .null
+            document.authConfig.map { .string($0) } ?? .null,
+            .string(document.responseBody),
+            .string(document.responseHeadersText),
+            .int(document.responseStatusCode),
+            .double(document.responseDuration),
+            .string(document.responseFieldsJSON)
         ]
-        
+
         try database.execute(sql, parameters: parameters)
     }
 
     func updateRequestDocument(_ document: MySQLRequestDocumentRecord) throws {
         try database.execute(
             """
-            UPDATE request_documents SET 
-            name = ?, api_status = ?, description = ?, method = ?, url_string = ?, 
-            query_text = ?, headers_text = ?, body_text = ?, variables_text = ?, 
-            auth_type = ?, auth_config = ?
+            UPDATE request_documents SET
+            name = ?, api_status = ?, description = ?, method = ?, url_string = ?,
+            query_text = ?, headers_text = ?, body_text = ?, variables_text = ?,
+            auth_type = ?, auth_config = ?, response_body = ?, response_headers_text = ?,
+            response_status_code = ?, response_duration = ?, response_fields_json = ?
             WHERE id = ?
             """,
             parameters: [
@@ -473,6 +510,11 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
                 .string(document.variablesText),
                 .string(document.authType),
                 document.authConfig.map { .string($0) } ?? .null,
+                .string(document.responseBody),
+                .string(document.responseHeadersText),
+                .int(document.responseStatusCode),
+                .double(document.responseDuration),
+                .string(document.responseFieldsJSON),
                 .string(document.id)
             ]
         )
@@ -488,15 +530,16 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
     func fetchRequestDocuments(projectID: String) throws -> [MySQLRequestDocumentRecord] {
         let rows = try database.query(
             """
-            SELECT id, project_id, name, api_status, description, method, url_string, 
-                   query_text, headers_text, body_text, variables_text, auth_type, auth_config 
-            FROM request_documents 
-            WHERE project_id = ? 
+            SELECT id, project_id, name, api_status, description, method, url_string,
+                   query_text, headers_text, body_text, variables_text, auth_type, auth_config,
+                   response_body, response_headers_text, response_status_code, response_duration, response_fields_json
+            FROM request_documents
+            WHERE project_id = ?
             ORDER BY created_at ASC
             """,
             parameters: [.string(projectID)]
         )
-        
+
         return rows.compactMap { row -> MySQLRequestDocumentRecord? in
             guard let id = row["id"] as? String,
                   let projectId = row["project_id"] as? String,
@@ -519,7 +562,12 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
                 bodyText: row["body_text"] as? String ?? "",
                 variablesText: row["variables_text"] as? String ?? "",
                 authType: row["auth_type"] as? String ?? "none",
-                authConfig: row["auth_config"] as? String
+                authConfig: row["auth_config"] as? String,
+                responseBody: row["response_body"] as? String ?? "",
+                responseHeadersText: row["response_headers_text"] as? String ?? "",
+                responseStatusCode: row["response_status_code"] as? Int ?? 0,
+                responseDuration: row["response_duration"] as? Double ?? 0,
+                responseFieldsJSON: row["response_fields_json"] as? String ?? "[]"
             )
         }
     }
@@ -527,13 +575,14 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
     func fetchAllRequestDocuments() throws -> [MySQLRequestDocumentRecord] {
         let rows = try database.query(
             """
-            SELECT id, project_id, name, api_status, description, method, url_string, 
-                   query_text, headers_text, body_text, variables_text, auth_type, auth_config 
-            FROM request_documents 
+            SELECT id, project_id, name, api_status, description, method, url_string,
+                   query_text, headers_text, body_text, variables_text, auth_type, auth_config,
+                   response_body, response_headers_text, response_status_code, response_duration, response_fields_json
+            FROM request_documents
             ORDER BY created_at ASC
             """
         )
-        
+
         return rows.compactMap { row -> MySQLRequestDocumentRecord? in
             guard let id = row["id"] as? String,
                   let projectId = row["project_id"] as? String,
@@ -556,8 +605,130 @@ final class MySQLRequestDocumentRepository: MySQLRepository {
                 bodyText: row["body_text"] as? String ?? "",
                 variablesText: row["variables_text"] as? String ?? "",
                 authType: row["auth_type"] as? String ?? "none",
-                authConfig: row["auth_config"] as? String
+                authConfig: row["auth_config"] as? String,
+                responseBody: row["response_body"] as? String ?? "",
+                responseHeadersText: row["response_headers_text"] as? String ?? "",
+                responseStatusCode: row["response_status_code"] as? Int ?? 0,
+                responseDuration: row["response_duration"] as? Double ?? 0,
+                responseFieldsJSON: row["response_fields_json"] as? String ?? "[]"
             )
         }
+    }
+}
+
+// MARK: - 环境变量仓库
+
+struct MySQLEnvironmentRecord: Equatable {
+    let id: String
+    let name: String
+    let isActive: Bool
+}
+
+struct MySQLEnvironmentVariableRecord: Equatable {
+    let id: String
+    let envId: String
+    let keyName: String
+    let value: String
+    let enabled: Bool
+}
+
+final class MySQLEnvironmentRepository: MySQLRepository {
+    override init(database: MySQLDatabase) throws {
+        try super.init(database: database)
+    }
+
+    func createEnvironment(id: String, name: String, isActive: Bool) throws {
+        try database.execute(
+            "INSERT INTO environments (id, name, is_active) VALUES (?, ?, ?)",
+            parameters: [.string(id), .string(name), .int(isActive ? 1 : 0)]
+        )
+    }
+
+    func updateEnvironment(id: String, name: String, isActive: Bool) throws {
+        try database.execute(
+            "UPDATE environments SET name = ?, is_active = ? WHERE id = ?",
+            parameters: [.string(name), .int(isActive ? 1 : 0), .string(id)]
+        )
+    }
+
+    func deleteEnvironment(id: String) throws {
+        try database.execute(
+            "DELETE FROM environments WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+
+    func setActiveEnvironment(id: String) throws {
+        try database.execute("UPDATE environments SET is_active = 0")
+        try database.execute(
+            "UPDATE environments SET is_active = 1 WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+
+    func fetchAllEnvironments() throws -> [MySQLEnvironmentRecord] {
+        let rows = try database.query("SELECT id, name, is_active FROM environments ORDER BY created_at ASC")
+        return rows.compactMap { row -> MySQLEnvironmentRecord? in
+            guard let id = row["id"] as? String,
+                  let name = row["name"] as? String else {
+                return nil
+            }
+            let isActive = (row["is_active"] as? Int) == 1
+            return MySQLEnvironmentRecord(id: id, name: name, isActive: isActive)
+        }
+    }
+
+    // MARK: - 环境变量
+
+    func createVariable(id: String, envId: String, keyName: String, value: String, enabled: Bool) throws {
+        try database.execute(
+            "INSERT INTO environment_variables (id, env_id, key_name, value, enabled) VALUES (?, ?, ?, ?, ?)",
+            parameters: [.string(id), .string(envId), .string(keyName), .string(value), .int(enabled ? 1 : 0)]
+        )
+    }
+
+    func updateVariable(id: String, keyName: String, value: String, enabled: Bool) throws {
+        try database.execute(
+            "UPDATE environment_variables SET key_name = ?, value = ?, enabled = ? WHERE id = ?",
+            parameters: [.string(keyName), .string(value), .int(enabled ? 1 : 0), .string(id)]
+        )
+    }
+
+    func deleteVariable(id: String) throws {
+        try database.execute(
+            "DELETE FROM environment_variables WHERE id = ?",
+            parameters: [.string(id)]
+        )
+    }
+
+    func fetchVariables(envId: String) throws -> [MySQLEnvironmentVariableRecord] {
+        let rows = try database.query(
+            "SELECT id, env_id, key_name, value, enabled FROM environment_variables WHERE env_id = ? ORDER BY created_at ASC",
+            parameters: [.string(envId)]
+        )
+        return rows.compactMap { row -> MySQLEnvironmentVariableRecord? in
+            guard let id = row["id"] as? String,
+                  let envId = row["env_id"] as? String,
+                  let keyName = row["key_name"] as? String,
+                  let value = row["value"] as? String else {
+                return nil
+            }
+            let enabled = (row["enabled"] as? Int) == 1
+            return MySQLEnvironmentVariableRecord(id: id, envId: envId, keyName: keyName, value: value, enabled: enabled)
+        }
+    }
+
+    func fetchActiveEnvironmentVariables() throws -> [String: String] {
+        guard let envRow = try database.query("SELECT id FROM environments WHERE is_active = 1 LIMIT 1").first,
+              let envId = envRow["id"] as? String else {
+            return [:]
+        }
+
+        let variables = try fetchVariables(envId: envId)
+        var result: [String: String] = [:]
+        for variable in variables where variable.enabled {
+            result[variable.keyName] = variable.value
+        }
+        return result
     }
 }
