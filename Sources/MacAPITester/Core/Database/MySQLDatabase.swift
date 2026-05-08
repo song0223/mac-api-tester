@@ -14,19 +14,32 @@ final class MySQLDatabase: @unchecked Sendable {
     private let lock = NSLock()
 
     /// 初始化MySQL数据库连接
+    /// - Throws: `MySQLError.connectionFailed` 如果连接失败
+    convenience init() throws {
+        let config = MySQLDatabase.loadConfig()
+        try self.init(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            password: config.password,
+            database: config.database
+        )
+    }
+
+    /// 初始化MySQL数据库连接
     /// - Parameters:
-    ///   - host: MySQL服务器地址，默认为"127.0.0.1"
-    ///   - port: MySQL服务器端口，默认为3306
-    ///   - username: 数据库用户名，默认为"root"
-    ///   - password: 数据库密码，默认为"Netime@2023"
-    ///   - database: 数据库名称，默认为"mac_api_tester"
+    ///   - host: MySQL服务器地址
+    ///   - port: MySQL服务器端口
+    ///   - username: 数据库用户名
+    ///   - password: 数据库密码
+    ///   - database: 数据库名称
     /// - Throws: `MySQLError.connectionFailed` 如果连接失败
     init(
-        host: String = "127.0.0.1",
-        port: UInt32 = 3306,
-        username: String = "root",
-        password: String = "Netime@2023",
-        database: String = "mac_api_tester"
+        host: String,
+        port: UInt32,
+        username: String,
+        password: String,
+        database: String
     ) throws {
         self.host = host
         self.port = port
@@ -36,6 +49,40 @@ final class MySQLDatabase: @unchecked Sendable {
 
         try connect()
         try createDatabaseIfNotExists()
+    }
+
+    /// 从配置文件加载数据库配置
+    private static func loadConfig() -> (host: String, port: UInt32, username: String, password: String, database: String) {
+        // 默认配置
+        var host = "127.0.0.1"
+        var port: UInt32 = 3306
+        var username = "root"
+        var password = ""
+        var database = "mac_api_tester"
+
+        // 尝试从配置文件加载
+        let configPaths = [
+            "config.json",
+            "../config.json",
+            "../../config.json",
+            Bundle.main.path(forResource: "config", ofType: "json")
+        ]
+
+        for path in configPaths.compactMap({ $0 }) {
+            if let data = FileManager.default.contents(atPath: path),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let dbConfig = json["database"] as? [String: Any] {
+                host = dbConfig["host"] as? String ?? host
+                port = UInt32(dbConfig["port"] as? Int ?? Int(port))
+                username = dbConfig["username"] as? String ?? username
+                password = dbConfig["password"] as? String ?? password
+                database = dbConfig["database"] as? String ?? database
+                print("✅ 从配置文件加载数据库配置: \(path)")
+                break
+            }
+        }
+
+        return (host, port, username, password, database)
     }
 
     deinit {
