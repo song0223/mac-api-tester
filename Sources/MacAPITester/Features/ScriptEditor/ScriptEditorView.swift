@@ -108,7 +108,7 @@ struct ScriptEditorView: View {
                 VStack {
                     Spacer()
                     Text("选择或创建一个脚本")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             }
@@ -128,7 +128,8 @@ struct ScriptEditorView: View {
         isRunning = true
         consoleOutput = "运行脚本: \(script.name)\n"
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        Task {
+            try await Task.sleep(for: .milliseconds(500))
             consoleOutput += "脚本执行完成\n"
             isRunning = false
         }
@@ -141,14 +142,14 @@ struct ScriptRow: View {
     var body: some View {
         HStack {
             Image(systemName: script.isEnabled ? "play.circle.fill" : "play.circle")
-                .foregroundColor(script.isEnabled ? .green : .gray)
+                .foregroundStyle(script.isEnabled ? .green : .gray)
             
             VStack(alignment: .leading) {
                 Text(script.name)
                     .font(.headline)
                 Text(script.scriptType.displayName)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()

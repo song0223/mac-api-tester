@@ -63,7 +63,7 @@ struct TestSuiteEditorView: View {
         HStack {
             Text("共 \(filteredSuites.count) 个套件")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
 
             Spacer()
         }
@@ -95,14 +95,14 @@ struct TestSuiteRow: View {
     var body: some View {
         HStack {
             Image(systemName: "folder.fill")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
 
             VStack(alignment: .leading) {
                 Text(suite.name)
                     .font(.headline)
                 Text(suite.description)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 

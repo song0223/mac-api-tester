@@ -3,232 +3,77 @@ import Foundation
 import SwiftUI
 
 struct AppContainer: View {
-    @State private var projects: [RequestProject]
-    @State private var selectedProjectID: RequestProject.ID?
-    @State private var requests: [RequestDocument]
-    @State private var openedRequestIDs: [RequestDocument.ID]
-    @State private var selectedRequestID: RequestDocument.ID?
-    @State private var latestResponse: RequestResponseSnapshot?
-    @State private var historyItems: [RequestHistoryItem] = []
-    @State private var errorMessage: String?
-    @State private var isSending = false
-    @State private var hasLoadedHistory = false
-    @State private var statusMessage: String?
-    @State private var showingCookiesEditor = false
-    @State private var showingScriptEditor = false
-    @State private var showingTestCaseEditor = false
-    @State private var showingDocServerSettings = false
-    @State private var showingEnvironmentEditor = false
-    @State private var showingCurlImport = false
-    @State private var showingHistory = false
-    @State private var newDocServerPort: Int?
-    @State private var cookieJar = CookieJar()
-    @State private var scripts: [Script] = []
-    @State private var testCases: [TestCase] = []
-    @State private var testSuites: [TestSuite] = []
-    @State private var environments: [Environment] = []
-    @State private var activeEnvironmentID: UUID?
-    @State private var historySearchText = ""
-    @State private var responseFields: [ResponseFieldInfo] = []
+    @State private var store = AppStore()
     private let workspaceBackground = Color(red: 249 / 255, green: 249 / 255, blue: 249 / 255)
-
-    private let templateRenderer = TemplateRenderer()
-    private let httpClient = HTTPClient()
-    private var historyPersistence: HistoryPersistence
-    private let cookieManager: CookieManager
-    private var testCaseManager: TestCaseManager
-    private var projectRepository: MySQLProjectRepository?
-    private var requestDocumentRepository: MySQLRequestDocumentRepository?
-    private var environmentRepository: MySQLEnvironmentRepository?
-    private var mysqlDatabase: MySQLDatabase?
-    @State private var docServer: DocServer?
-
-    init() {
-        let storage = CookieStorage()
-        let manager = CookieManager(storage: storage)
-        self.cookieManager = manager
-        _cookieJar = State(initialValue: manager.cookieJar)
-
-        do {
-            print("正在初始化MySQL数据库...")
-            let mysqlDatabase = try MySQLDatabase()
-            print("MySQL数据库连接成功")
-            let migration = DatabaseMigration(mysqlDatabase: mysqlDatabase)
-            try migration.migrate()
-            print("数据库迁移完成")
-            self.mysqlDatabase = mysqlDatabase
-            self.historyPersistence = HistoryPersistence(database: mysqlDatabase)
-            self.testCaseManager = TestCaseManager(database: mysqlDatabase)
-            self.projectRepository = try MySQLProjectRepository(database: mysqlDatabase)
-            self.requestDocumentRepository = try MySQLRequestDocumentRepository(database: mysqlDatabase)
-            self.environmentRepository = try MySQLEnvironmentRepository(database: mysqlDatabase)
-            print("仓库初始化完成")
-            
-            let server = DocServer(database: mysqlDatabase)
-            try? server.start()
-            _docServer = State(initialValue: server)
-            
-            // 从数据库加载数据
-            let loadedProjects = try projectRepository?.fetchAllProjects() ?? []
-            let allRequestDocuments = try requestDocumentRepository?.fetchAllRequestDocuments() ?? []
-
-            // 加载环境变量
-            let loadedEnvironments = try environmentRepository?.fetchAllEnvironments() ?? []
-            var envs: [Environment] = []
-            for envRecord in loadedEnvironments {
-                let variables = try environmentRepository?.fetchVariables(envId: envRecord.id) ?? []
-                let env = Environment(
-                    id: UUID(uuidString: envRecord.id) ?? UUID(),
-                    name: envRecord.name,
-                    isActive: envRecord.isActive,
-                    variables: variables.map { v in
-                        EnvironmentVariable(
-                            id: UUID(uuidString: v.id) ?? UUID(),
-                            key: v.keyName,
-                            value: v.value,
-                            enabled: v.enabled
-                        )
-                    }
-                )
-                envs.append(env)
-            }
-            _environments = State(initialValue: envs)
-            _activeEnvironmentID = State(initialValue: envs.first(where: { $0.isActive })?.id)
-
-            if loadedProjects.isEmpty {
-                // 数据库为空，创建默认项目
-                let initialProject = RequestProject(name: "默认项目")
-                let initialRequest = RequestDocument.starter(projectID: initialProject.id)
-                _projects = State(initialValue: [initialProject])
-                _selectedProjectID = State(initialValue: initialProject.id)
-                _requests = State(initialValue: [initialRequest])
-                _openedRequestIDs = State(initialValue: [initialRequest.id])
-                _selectedRequestID = State(initialValue: initialRequest.id)
-                
-                // 保存到数据库
-                try projectRepository?.createProject(id: initialProject.id.uuidString, name: initialProject.name)
-                try requestDocumentRepository?.createRequestDocument(initialRequest.toMySQLRecord())
-            } else {
-                // 从数据库加载
-                let projects = loadedProjects.map { RequestProject(id: UUID(uuidString: $0.id) ?? UUID(), name: $0.name) }
-                let requests = allRequestDocuments.compactMap { RequestDocument.fromMySQLRecord($0) }
-
-                _projects = State(initialValue: projects)
-                _selectedProjectID = State(initialValue: projects.first?.id)
-                _requests = State(initialValue: requests)
-                _openedRequestIDs = State(initialValue: Array(requests.prefix(5).map { $0.id }))
-                _selectedRequestID = State(initialValue: requests.first?.id)
-                _responseFields = State(initialValue: requests.first?.responseFields ?? [])
-
-                // 加载第一个请求的响应状态
-                if let firstRequest = requests.first {
-                    if firstRequest.responseStatusCode > 0 {
-                        _latestResponse = State(initialValue: RequestResponseSnapshot(
-                            statusCode: firstRequest.responseStatusCode,
-                            duration: firstRequest.responseDuration,
-                            headersText: firstRequest.responseHeadersText,
-                            bodyText: firstRequest.responseBody,
-                            timestamp: Date()
-                        ))
-                    } else if !firstRequest.responseBody.isEmpty {
-                        _latestResponse = State(initialValue: RequestResponseSnapshot(
-                            statusCode: 0,
-                            duration: 0,
-                            headersText: firstRequest.responseHeadersText,
-                            bodyText: firstRequest.responseBody,
-                            timestamp: Date()
-                        ))
-                    }
-                }
-            }
-        } catch {
-            print("MySQL初始化失败，使用内存存储: \(error)")
-            self.mysqlDatabase = nil
-            self.projectRepository = nil
-            self.requestDocumentRepository = nil
-            self.environmentRepository = nil
-            self.historyPersistence = HistoryPersistence.inMemory
-            self.testCaseManager = TestCaseManager()
-            _docServer = State(initialValue: nil)
-            _environments = State(initialValue: [])
-            _activeEnvironmentID = State(initialValue: nil)
-
-            // 使用默认数据
-            let initialProject = RequestProject(name: "默认项目")
-            let initialRequest = RequestDocument.starter(projectID: initialProject.id)
-            _projects = State(initialValue: [initialProject])
-            _selectedProjectID = State(initialValue: initialProject.id)
-            _requests = State(initialValue: [initialRequest])
-            _openedRequestIDs = State(initialValue: [initialRequest.id])
-            _selectedRequestID = State(initialValue: initialRequest.id)
-            _statusMessage = State(initialValue: "⚠️ MySQL连接失败，使用临时内存存储（数据不会持久化）")
-        }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 CollectionsView(
-                    projects: projects,
-                    selectedProjectID: $selectedProjectID,
-                    requests: requests,
-                    selectedRequestID: $selectedRequestID,
-                    requestCountByProject: requestCountByProject,
-                    onAddProject: addProject,
-                    onDeleteProject: deleteProject,
-                    onRenameProject: renameProject,
-                    onAddRequest: addRequest,
-                    onDeleteRequest: deleteRequest
+                    projects: store.projects,
+                    selectedProjectID: $store.selectedProjectID,
+                    requests: store.requests,
+                    selectedRequestID: $store.selectedRequestID,
+                    requestCountByProject: store.requestCountByProject,
+                    onAddProject: store.addProject,
+                    onDeleteProject: store.deleteProject,
+                    onRenameProject: store.renameProject,
+                    onAddRequest: store.addRequest,
+                    onDeleteRequest: store.deleteRequest
                 )
             } detail: {
-                if let requestBinding = selectedRequestBinding {
+                ZStack {
+                    // 稳定的基础视图 - 始终存在
                     VStack(spacing: 0) {
-                        workspaceTabs
-                        Divider()
-                        workspaceMetaRow(request: requestBinding)
+                        WorkspaceTabs(store: store)
                         Divider()
 
-                        ScrollView(.vertical) {
-                            VStack(spacing: 4) {
-                                RequestEditorView(
-                                    request: requestBinding,
-                                    isSending: isSending,
-                                    errorMessage: errorMessage,
-                                    onSend: triggerSend,
-                                    showInlineRunButton: false
-                                )
+                        if let requestBinding = store.selectedRequestBinding {
+                            WorkspaceMetaRow(store: store, request: requestBinding)
+                            Divider()
 
-                                ResponseViewerView(
-                                    response: latestResponse,
-                                    historyItems: historyItems,
-                                    errorMessage: errorMessage,
-                                    historySearchText: $historySearchText,
-                                    responseFields: $responseFields,
-                                    onHistorySearch: { loadHistory() },
-                                    onFieldsChanged: { syncResponseFieldsToDatabase() },
-                                    onResponseBodyChanged: { newBody in
-                                        if let selectedRequestIndex {
-                                            requests[selectedRequestIndex].responseBody = newBody
-                                            latestResponse = RequestResponseSnapshot(
-                                                statusCode: requests[selectedRequestIndex].responseStatusCode,
-                                                duration: requests[selectedRequestIndex].responseDuration,
-                                                headersText: requests[selectedRequestIndex].responseHeadersText,
-                                                bodyText: newBody,
-                                                timestamp: Date()
-                                            )
-                                            syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
+                            ScrollView(.vertical) {
+                                VStack(spacing: 4) {
+                                    RequestEditorView(
+                                        request: requestBinding,
+                                        isSending: store.isSending,
+                                        errorMessage: store.errorMessage,
+                                        onSend: store.triggerSend,
+                                        showInlineRunButton: false
+                                    )
+
+                                    ResponseViewerView(
+                                        response: store.latestResponse,
+                                        historyItems: store.historyItems,
+                                        errorMessage: store.errorMessage,
+                                        historySearchText: $store.historySearchText,
+                                        responseFields: $store.responseFields,
+                                        onHistorySearch: { store.loadHistory() },
+                                        onFieldsChanged: { store.syncResponseFieldsToDatabase() },
+                                        onResponseBodyChanged: { newBody in
+                                            store.handleResponseBodyChanged(newBody)
                                         }
-                                    }
-                                )
+                                    )
+                                }
+                                .frame(maxWidth: .infinity, alignment: .top)
                             }
-                            .frame(maxWidth: .infinity, alignment: .top)
-                        }
 
-                        bottomActionBar
+                            BottomActionBar(store: store)
+                        } else {
+                            Spacer()
+                            PlaceholderView(
+                                title: "请选择一个接口",
+                                message: "请在左侧选择接口，或先新建项目并添加接口。"
+                            )
+                            Spacer()
+                        }
                     }
                     .background(workspaceBackground)
-                    .overlay(alignment: .bottom) {
-                        if let statusMessage, !statusMessage.isEmpty {
+
+                    // 状态消息叠加层 - 独立于主内容
+                    if let statusMessage = store.statusMessage, !statusMessage.isEmpty {
+                        VStack {
+                            Spacer()
                             Text(statusMessage)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.white)
@@ -236,92 +81,144 @@ struct AppContainer: View {
                                 .padding(.vertical, 8)
                                 .background(Color.black.opacity(0.78), in: Capsule())
                                 .padding(.bottom, 68)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .animation(.easeInOut(duration: 0.2), value: store.statusMessage)
                     }
-                    .animation(.easeInOut(duration: 0.2), value: statusMessage)
-                } else {
-                    placeholderView(
-                        title: "请选择一个接口",
-                        message: "请在左侧选择接口，或先新建项目并添加接口。"
-                    )
                 }
             }
             .navigationSplitViewStyle(.balanced)
         }
         .frame(minWidth: 1280, minHeight: 820)
         .task {
-            loadHistoryIfNeeded()
+            store.loadHistoryIfNeeded()
         }
-        .onChange(of: selectedRequestID) { _, newValue in
-            guard let newValue else { return }
-            openRequestTabIfNeeded(newValue)
-            if let ownerProjectID = requests.first(where: { $0.id == newValue })?.projectID {
-                selectedProjectID = ownerProjectID
-            }
-            // 加载选中请求的响应状态和参数说明
-            if let request = requests.first(where: { $0.id == newValue }) {
-                responseFields = request.responseFields
-                if request.responseStatusCode > 0 {
-                    latestResponse = RequestResponseSnapshot(
-                        statusCode: request.responseStatusCode,
-                        duration: request.responseDuration,
-                        headersText: request.responseHeadersText,
-                        bodyText: request.responseBody,
-                        timestamp: Date()
-                    )
-                } else if !request.responseBody.isEmpty {
-                    latestResponse = RequestResponseSnapshot(
-                        statusCode: 0,
-                        duration: 0,
-                        headersText: request.responseHeadersText,
-                        bodyText: request.responseBody,
-                        timestamp: Date()
-                    )
-                } else {
-                    latestResponse = nil
-                }
+        .onChange(of: store.selectedRequestID) { _, newValue in
+            withAnimation(.easeOut(duration: 0.15)) {
+                store.handleSelectedRequestChange(newValue)
             }
         }
-        .onChange(of: selectedProjectID) { _, newValue in
-            guard let projectID = newValue else { return }
-
-            // 清空标签页，只保留新项目的接口
-            openedRequestIDs = openedRequestIDs.filter { id in
-                requests.contains(where: { $0.id == id && $0.projectID == projectID })
-            }
-
-            // 如果当前选中的接口不属于新项目，切换到新项目的第一个接口
-            if let selectedRequestID,
-               requests.contains(where: { $0.id == selectedRequestID && $0.projectID == projectID }) {
-                // 当前接口属于新项目，保持不变
-            } else {
-                let fallback = requests.first(where: { $0.projectID == projectID })
-                self.selectedRequestID = fallback?.id
-                if let fallback {
-                    openRequestTabIfNeeded(fallback.id)
-                } else {
-                    latestResponse = nil
-                    errorMessage = nil
-                    responseFields = []
-                }
+        .onChange(of: store.selectedProjectID) { _, newValue in
+            withAnimation(.easeOut(duration: 0.12)) {
+                store.handleSelectedProjectChange(newValue)
             }
         }
-        .onChange(of: statusMessage) { _, newValue in
-            guard let newValue, !newValue.isEmpty else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                if statusMessage == newValue {
-                    statusMessage = nil
-                }
-            }
+        .onChange(of: store.statusMessage) { _, newValue in
+            store.handleStatusMessageChange(newValue)
+        }
+        .sheet(item: $store.presentedSheet) { destination in
+            SheetDestinationView(store: store, destination: destination)
+        }
+        .onChange(of: store.newDocServerPort) { _, newPort in
+            store.handleDocServerPortChange(newPort)
         }
     }
+}
 
-    private var workspaceTabs: some View {
+// MARK: - Sheet 路由视图
+
+struct SheetDestinationView: View {
+    @Bindable var store: AppStore
+    let destination: SheetDestination
+
+    var body: some View {
+        switch destination {
+        case .cookiesEditor:
+            CookiesEditorView(
+                cookieJar: $store.cookieJar,
+                onImport: { data in
+                    try? store.cookieManager.importCookies(from: data)
+                    store.cookieJar = store.cookieManager.cookieJar
+                },
+                onExport: {
+                    try? store.cookieManager.exportCookies()
+                }
+            )
+        case .scriptEditor:
+            ScriptEditorView(
+                scripts: $store.scripts,
+                onRequestUpdate: { _ in }
+            )
+        case .testCaseEditor(let requestID):
+            TestCaseEditorView(
+                testCases: $store.testCases,
+                requestID: requestID
+            )
+        case .docServerSettings:
+            DocServerSettingsSheet(store: store)
+        case .environmentEditor:
+            EnvironmentEditorView(
+                environments: $store.environments,
+                activeEnvironmentID: $store.activeEnvironmentID,
+                onSave: { store.syncEnvironmentsToDatabase() }
+            )
+        case .curlImport:
+            CurlImportSheet(store: store)
+        case .history:
+            HistorySheet(store: store)
+        }
+    }
+}
+
+// MARK: - Sheet 子视图（拥有自己的 dismiss 逻辑）
+
+struct DocServerSettingsSheet: View {
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+    let store: AppStore
+
+    var body: some View {
+        DocServerSettingsView(
+            isPresented: .constant(true),
+            server: store.docServer,
+            onRestart: { newPort in
+                store.restartDocServer(port: newPort)
+                dismiss()
+            }
+        )
+    }
+}
+
+struct CurlImportSheet: View {
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+    let store: AppStore
+
+    var body: some View {
+        CurlImportView(
+            onImport: { result in
+                store.importCurlResult(result)
+                dismiss()
+            },
+            onCancel: {
+                dismiss()
+            }
+        )
+    }
+}
+
+struct HistorySheet: View {
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+    @Bindable var store: AppStore
+
+    var body: some View {
+        HistoryView(
+            historyItems: store.historyItems,
+            historySearchText: $store.historySearchText,
+            onSearch: { store.loadHistory() },
+            onDismiss: { dismiss() }
+        )
+    }
+}
+
+// MARK: - 工作区标签页
+
+struct WorkspaceTabs: View {
+    let store: AppStore
+
+    var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ForEach(openedRequests) { request in
-                    let isSelected = request.id == selectedRequestID
+                ForEach(store.openedRequests) { request in
+                    let isSelected = request.id == store.selectedRequestID
                     HStack(spacing: 8) {
                         Circle()
                             .fill(isSelected ? Color.blue : Color.gray.opacity(0.5))
@@ -332,7 +229,7 @@ struct AppContainer: View {
                             .truncationMode(.tail)
                         Spacer(minLength: 0)
                         Button {
-                            closeRequestTab(request.id)
+                            store.closeRequestTab(request.id)
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 10, weight: .semibold))
@@ -346,9 +243,12 @@ struct AppContainer: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
+                    .animation(.easeOut(duration: 0.1), value: isSelected)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        selectedRequestID = request.id
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            store.selectedRequestID = request.id
+                        }
                     }
                     .pointingHandCursor()
                 }
@@ -356,19 +256,49 @@ struct AppContainer: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
+}
 
-    private func workspaceMetaRow(request: Binding<RequestDocument>) -> some View {
+// MARK: - 工作区元数据行
+
+struct WorkspaceMetaRow: View {
+    let store: AppStore
+    @Binding var request: RequestDocument
+
+    var body: some View {
         HStack(spacing: 10) {
-            statusAndNameRow(request: request)
-                .frame(width: 300)
+            TextField("接口名称", text: $request.name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 12)
+                .frame(minWidth: 300, maxWidth: 300, minHeight: 36, maxHeight: 36, alignment: .leading)
+                .background(
+                    Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
 
-            descriptionInput(text: request.descriptionText, placeholder: "(选填) 请输入接口描述")
+            TextField("(选填) 请输入接口描述", text: $request.descriptionText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
+                .background(
+                    Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
 
             Divider()
                 .frame(height: 28)
 
             Button(action: {
-                copyAsCurl(request.wrappedValue)
+                store.copyAsCurl(request)
             }) {
                 Image(systemName: "doc.on.doc")
                     .foregroundStyle(.secondary)
@@ -378,7 +308,7 @@ struct AppContainer: View {
             .help("复制为 cURL 命令")
 
             Button(action: {
-                showingHistory = true
+                store.presentedSheet = .history
             }) {
                 Image(systemName: "clock")
                     .foregroundStyle(.secondary)
@@ -392,56 +322,30 @@ struct AppContainer: View {
         .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
     }
+}
 
-    private func statusAndNameRow(request: Binding<RequestDocument>) -> some View {
-        TextField("接口名称", text: request.name)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14, weight: .semibold))
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
-            .background(
-                Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
-    }
+// MARK: - 底部操作栏
 
-    private func descriptionInput(text: Binding<String>, placeholder: String) -> some View {
-        TextField(placeholder, text: text)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14))
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
-            .background(
-                Color(red: 244 / 255, green: 244 / 255, blue: 244 / 255),
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
-    }
+struct BottomActionBar: View {
+    let store: AppStore
 
-    private var bottomActionBar: some View {
+    var body: some View {
         HStack(spacing: 12) {
             // 左侧：核心操作
             HStack(spacing: 6) {
-                toolButton(icon: "square.and.arrow.down", label: "保存", action: saveCurrentDraft)
-                toolButton(icon: "doc.text", label: "文档", action: generateDocument)
+                ToolButton(icon: "square.and.arrow.down", label: "保存", action: store.saveCurrentDraft)
+                ToolButton(icon: "doc.text", label: "文档", action: store.generateDocument)
 
-                Button(action: triggerSend) {
+                Button(action: store.triggerSend) {
                     HStack(spacing: 6) {
-                        if isSending {
+                        if store.isSending {
                             ProgressView()
                                 .controlSize(.mini)
                         } else {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 11))
                         }
-                        Text(isSending ? "调试中" : "运行调试")
+                        Text(store.isSending ? "调试中" : "运行调试")
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .padding(.horizontal, 14)
@@ -451,7 +355,7 @@ struct AppContainer: View {
                 }
                 .buttonStyle(.plain)
                 .pointingHandCursor()
-                .disabled(isSending || selectedRequestBinding == nil)
+                .disabled(store.isSending || store.selectedRequestBinding == nil)
             }
 
             Divider()
@@ -459,18 +363,30 @@ struct AppContainer: View {
 
             // 中间：工具按钮
             HStack(spacing: 4) {
-                toolButton(icon: "lock.shield", label: "Cookies", action: { showingCookiesEditor = true })
-                toolButton(icon: "terminal", label: "脚本", action: { showingScriptEditor = true })
-                toolButton(icon: "checklist", label: "用例", action: { showingTestCaseEditor = true })
-                toolButton(icon: "doc.richtext", label: "文档设置", action: { showingDocServerSettings = true })
-                toolButton(icon: "slider.horizontal.3", label: "环境", action: { showingEnvironmentEditor = true })
-                toolButton(icon: "square.and.arrow.up", label: "cURL", action: { showingCurlImport = true })
+                ToolButton(icon: "lock.shield", label: "Cookies") {
+                    store.presentedSheet = .cookiesEditor
+                }
+                ToolButton(icon: "terminal", label: "脚本") {
+                    store.presentedSheet = .scriptEditor
+                }
+                ToolButton(icon: "checklist", label: "用例") {
+                    store.presentedSheet = .testCaseEditor(requestID: store.selectedRequestID ?? UUID())
+                }
+                ToolButton(icon: "doc.richtext", label: "文档设置") {
+                    store.presentedSheet = .docServerSettings
+                }
+                ToolButton(icon: "slider.horizontal.3", label: "环境") {
+                    store.presentedSheet = .environmentEditor
+                }
+                ToolButton(icon: "square.and.arrow.up", label: "cURL") {
+                    store.presentedSheet = .curlImport
+                }
             }
 
             Spacer()
 
             // 右侧：当前环境标签
-            if let activeEnv = environments.first(where: { $0.id == activeEnvironmentID }) {
+            if let activeEnv = store.environments.first(where: { $0.id == store.activeEnvironmentID }) {
                 HStack(spacing: 5) {
                     Circle()
                         .fill(.green)
@@ -488,80 +404,17 @@ struct AppContainer: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
-        .sheet(isPresented: $showingCookiesEditor) {
-            CookiesEditorView(
-                cookieJar: $cookieJar,
-                onImport: { data in
-                    try? cookieManager.importCookies(from: data)
-                    cookieJar = cookieManager.cookieJar
-                },
-                onExport: {
-                    try? cookieManager.exportCookies()
-                }
-            )
-        }
-        .sheet(isPresented: $showingScriptEditor) {
-            ScriptEditorView(
-                scripts: $scripts,
-                onRequestUpdate: { _ in }
-            )
-        }
-        .sheet(isPresented: $showingTestCaseEditor) {
-            TestCaseEditorView(
-                testCases: $testCases,
-                requestID: selectedRequestID ?? UUID()
-            )
-        }
-        .sheet(isPresented: $showingDocServerSettings) {
-            DocServerSettingsView(
-                isPresented: $showingDocServerSettings,
-                server: docServer,
-                onRestart: { newPort in
-                    newDocServerPort = newPort
-                }
-            )
-        }
-        .sheet(isPresented: $showingEnvironmentEditor) {
-            EnvironmentEditorView(
-                environments: $environments,
-                activeEnvironmentID: $activeEnvironmentID,
-                onSave: { syncEnvironmentsToDatabase() }
-            )
-        }
-        .sheet(isPresented: $showingCurlImport) {
-            CurlImportView(
-                onImport: { result in
-                    importCurlResult(result)
-                    showingCurlImport = false
-                },
-                onCancel: {
-                    showingCurlImport = false
-                }
-            )
-        }
-        .sheet(isPresented: $showingHistory) {
-            HistoryView(
-                historyItems: historyItems,
-                historySearchText: $historySearchText,
-                onSearch: { loadHistory() },
-                onDismiss: { showingHistory = false }
-            )
-        }
-        .onChange(of: newDocServerPort) { _, newPort in
-            guard let newPort else { return }
-            docServer?.stop()
-            guard let mysqlDatabase else { return }
-            docServer = DocServer(port: newPort, database: mysqlDatabase)
-            try? docServer?.start()
-            newDocServerPort = nil
-        }
     }
+}
 
-    private var selectedRequestIndex: Int? {
-        requests.firstIndex(where: { $0.id == selectedRequestID })
-    }
+// MARK: - 工具按钮
 
-    private func toolButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+struct ToolButton: View {
+    let icon: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
@@ -576,760 +429,15 @@ struct AppContainer: View {
         .buttonStyle(.plain)
         .pointingHandCursor()
     }
+}
 
-    private var openedRequests: [RequestDocument] {
-        openedRequestIDs.compactMap { id in
-            requests.first(where: { $0.id == id })
-        }
-        .filter { request in
-            guard let selectedProjectID else { return true }
-            return request.projectID == selectedProjectID
-        }
-    }
+// MARK: - 占位视图
 
-    private var requestCountByProject: [RequestProject.ID: Int] {
-        requests.reduce(into: [RequestProject.ID: Int]()) { partial, request in
-            partial[request.projectID, default: 0] += 1
-        }
-    }
+struct PlaceholderView: View {
+    let title: String
+    let message: String
 
-    private var selectedRequestBinding: Binding<RequestDocument>? {
-        guard let selectedRequestIndex else {
-            return nil
-        }
-        return $requests[selectedRequestIndex]
-    }
-
-    private func addRequest() {
-        guard let selectedProjectID else {
-            addProject()
-            return
-        }
-        let nextIndex = requests.filter { $0.projectID == selectedProjectID }.count + 1
-        let request = RequestDocument.starter(
-            named: "Request \(nextIndex)",
-            projectID: selectedProjectID
-        )
-        requests.append(request)
-        openRequestTabIfNeeded(request.id)
-        selectedRequestID = request.id
-        errorMessage = nil
-        statusMessage = "已新增接口草稿：\(request.name)"
-        
-        // 同步到数据库
-        syncRequestToDatabase(request, isNew: true)
-    }
-
-    private func closeRequestTab(_ id: RequestDocument.ID) {
-        guard let index = openedRequestIDs.firstIndex(of: id) else {
-            return
-        }
-
-        openedRequestIDs.remove(at: index)
-
-        if selectedRequestID == id {
-            if let fallbackID = openedRequestIDs.last {
-                selectedRequestID = fallbackID
-            } else {
-                selectedRequestID = nil
-                latestResponse = nil
-                errorMessage = nil
-            }
-        }
-
-        statusMessage = "已关闭接口标签"
-    }
-
-    private func deleteRequest(_ id: RequestDocument.ID) {
-        guard let requestIndex = requests.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-
-        let removedRequest = requests.remove(at: requestIndex)
-        openedRequestIDs.removeAll(where: { $0 == id })
-
-        if selectedRequestID == id {
-            if let fallbackOpened = openedRequestIDs.last {
-                selectedRequestID = fallbackOpened
-            } else if let firstRequest = requests.first(where: { $0.projectID == selectedProjectID }) ?? requests.first {
-                selectedRequestID = firstRequest.id
-                openRequestTabIfNeeded(firstRequest.id)
-            } else {
-                selectedRequestID = nil
-                latestResponse = nil
-                errorMessage = nil
-            }
-        }
-
-        statusMessage = "已删除接口：\(removedRequest.name)"
-        
-        // 从数据库删除
-        syncRequestDeletion(id)
-    }
-
-    private func addProject() {
-        let project = RequestProject(name: "项目 \(projects.count + 1)")
-        projects.append(project)
-        selectedProjectID = project.id
-        let seedRequest = RequestDocument.starter(named: "Request 1", projectID: project.id)
-        requests.append(seedRequest)
-        openRequestTabIfNeeded(seedRequest.id)
-        selectedRequestID = seedRequest.id
-        statusMessage = "已新增项目：\(project.name)"
-        
-        // 同步到数据库
-        syncProjectToDatabase(project, isNew: true)
-        syncRequestToDatabase(seedRequest, isNew: true)
-    }
-
-    private func renameProject(_ id: RequestProject.ID, _ newName: String) {
-        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
-        projects[index].name = newName
-        statusMessage = "已重命名项目：\(newName)"
-        
-        // 同步到数据库
-        syncProjectToDatabase(projects[index], isNew: false)
-    }
-
-    private func deleteProject(_ id: RequestProject.ID) {
-        guard let projectIndex = projects.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-
-        let removingProject = projects.remove(at: projectIndex)
-        let removingRequestIDs = Set(requests.filter { $0.projectID == id }.map(\.id))
-        requests.removeAll(where: { removingRequestIDs.contains($0.id) })
-        openedRequestIDs.removeAll(where: { removingRequestIDs.contains($0) })
-
-        if projects.isEmpty {
-            addProject()
-        } else if selectedProjectID == id {
-            selectedProjectID = projects[max(0, min(projectIndex, projects.count - 1))].id
-        }
-
-        if let selectedRequestID, removingRequestIDs.contains(selectedRequestID) {
-            if let fallback = requests.first(where: { $0.projectID == selectedProjectID }) ?? requests.first {
-                self.selectedRequestID = fallback.id
-                openRequestTabIfNeeded(fallback.id)
-            } else {
-                self.selectedRequestID = nil
-                latestResponse = nil
-                errorMessage = nil
-            }
-        }
-
-        statusMessage = "已删除项目：\(removingProject.name)"
-        
-        // 从数据库删除
-        syncProjectDeletion(id)
-        for requestID in removingRequestIDs {
-            syncRequestDeletion(requestID)
-        }
-    }
-
-    private func openRequestTabIfNeeded(_ id: RequestDocument.ID) {
-        guard requests.contains(where: { $0.id == id }) else {
-            return
-        }
-        if !openedRequestIDs.contains(id) {
-            openedRequestIDs.append(id)
-        }
-    }
-    
-    // MARK: - 数据库同步方法
-    
-    private func syncProjectToDatabase(_ project: RequestProject, isNew: Bool) {
-        guard let projectRepository else { return }
-        
-        do {
-            if isNew {
-                try projectRepository.createProject(id: project.id.uuidString, name: project.name)
-            } else {
-                try projectRepository.updateProject(id: project.id.uuidString, name: project.name)
-            }
-        } catch {
-            print("同步项目到数据库失败: \(error)")
-        }
-    }
-    
-    private func syncProjectDeletion(_ id: RequestProject.ID) {
-        guard let projectRepository else { return }
-        
-        do {
-            try projectRepository.deleteProject(id: id.uuidString)
-        } catch {
-            print("从数据库删除项目失败: \(error)")
-        }
-    }
-    
-    private func syncRequestToDatabase(_ request: RequestDocument, isNew: Bool) {
-        guard let requestDocumentRepository else { 
-            print("requestDocumentRepository为空，跳过同步")
-            return 
-        }
-        
-        do {
-            let record = request.toMySQLRecord()
-            print("准备同步请求到数据库: \(request.name), isNew: \(isNew)")
-            if isNew {
-                try requestDocumentRepository.createRequestDocument(record)
-                print("请求创建成功: \(request.name)")
-            } else {
-                try requestDocumentRepository.updateRequestDocument(record)
-                print("请求更新成功: \(request.name)")
-            }
-        } catch {
-            print("同步请求到数据库失败: \(error)")
-        }
-    }
-    
-    private func syncRequestDeletion(_ id: RequestDocument.ID) {
-        guard let requestDocumentRepository else { return }
-
-        do {
-            try requestDocumentRepository.deleteRequestDocument(id: id.uuidString)
-        } catch {
-            print("从数据库删除请求失败: \(error)")
-        }
-    }
-
-    private func syncResponseFieldsToDatabase() {
-        guard let selectedRequestIndex else { return }
-        requests[selectedRequestIndex].responseFields = responseFields
-        syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
-    }
-
-    private func syncEnvironmentsToDatabase() {
-        guard let environmentRepository else { return }
-
-        do {
-            // 获取数据库中现有的环境
-            let existingEnvs = try environmentRepository.fetchAllEnvironments()
-            let existingEnvIDs = Set(existingEnvs.map { $0.id })
-            let currentEnvIDs = Set(environments.map { $0.id.uuidString })
-
-            // 删除不再存在的环境
-            for envID in existingEnvIDs where !currentEnvIDs.contains(envID) {
-                try environmentRepository.deleteEnvironment(id: envID)
-            }
-
-            // 创建或更新环境
-            for env in environments {
-                let envID = env.id.uuidString
-                if existingEnvIDs.contains(envID) {
-                    try environmentRepository.updateEnvironment(id: envID, name: env.name, isActive: env.isActive)
-                } else {
-                    try environmentRepository.createEnvironment(id: envID, name: env.name, isActive: env.isActive)
-                }
-
-                // 同步环境变量
-                let existingVars = try environmentRepository.fetchVariables(envId: envID)
-                let existingVarIDs = Set(existingVars.map { $0.id })
-                let currentVarIDs = Set(env.variables.map { $0.id.uuidString })
-
-                // 删除不再存在的变量
-                for varID in existingVarIDs where !currentVarIDs.contains(varID) {
-                    try environmentRepository.deleteVariable(id: varID)
-                }
-
-                // 创建或更新变量
-                for variable in env.variables {
-                    let varID = variable.id.uuidString
-                    if existingVarIDs.contains(varID) {
-                        try environmentRepository.updateVariable(id: varID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
-                    } else {
-                        try environmentRepository.createVariable(id: varID, envId: envID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
-                    }
-                }
-            }
-        } catch {
-            print("同步环境变量到数据库失败: \(error)")
-        }
-    }
-
-    private func importCurlResult(_ result: CurlParseResult) {
-        guard let selectedProjectID else { return }
-
-        // 构建 headers 文本
-        var headersText = ""
-        for (key, value) in result.headers {
-            headersText += "\(key): \(value)\n"
-        }
-
-        // 创建新的请求文档
-        let newRequest = RequestDocument(
-            projectID: selectedProjectID,
-            name: "从 cURL 导入",
-            method: result.method,
-            urlString: result.url,
-            headersText: headersText,
-            bodyText: result.body ?? ""
-        )
-
-        // 添加到请求列表
-        requests.append(newRequest)
-        openedRequestIDs.append(newRequest.id)
-        selectedRequestID = newRequest.id
-
-        // 同步到数据库
-        syncRequestToDatabase(newRequest, isNew: true)
-
-        statusMessage = "已从 cURL 导入请求"
-    }
-
-    private func copyAsCurl(_ document: RequestDocument) {
-        let exporter = CurlExporter()
-        let curl = exporter.export(document)
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(curl, forType: .string)
-
-        statusMessage = "已复制 cURL 命令到剪贴板"
-    }
-
-    @MainActor
-    private func triggerSend() {
-        guard !isSending, selectedRequestIndex != nil else {
-            return
-        }
-
-        isSending = true
-        errorMessage = nil
-        statusMessage = "正在运行调试..."
-
-        Task {
-            await sendSelectedRequest()
-        }
-    }
-
-    @MainActor
-    private func sendSelectedRequest() async {
-        defer {
-            isSending = false
-        }
-
-        guard let selectedRequestIndex else {
-            return
-        }
-
-        let requestDocument = requests[selectedRequestIndex]
-
-        do {
-            var variables = try parseVariables(from: requestDocument.variablesText)
-
-            // 合并环境变量（环境变量优先级低于请求级变量）
-            if let envID = activeEnvironmentID,
-               let env = environments.first(where: { $0.id == envID }) {
-                for v in env.variables where v.enabled && !v.key.isEmpty {
-                    if variables[v.key] == nil {
-                        variables[v.key] = v.value
-                    }
-                }
-            }
-            let urlRequest = try buildRequest(from: requestDocument, variables: variables)
-            let response = try await httpClient.send(urlRequest)
-            let snapshot = RequestResponseSnapshot(
-                statusCode: response.statusCode,
-                duration: response.duration,
-                headersText: formatHeaders(response.headers),
-                bodyText: formatBody(response.body),
-                timestamp: Date()
-            )
-
-            latestResponse = snapshot
-            persistHistory(for: requestDocument, request: urlRequest, response: snapshot)
-
-            // 保存响应内容到请求文档
-            requests[selectedRequestIndex].responseBody = snapshot.bodyText
-            requests[selectedRequestIndex].responseHeadersText = snapshot.headersText
-            requests[selectedRequestIndex].responseStatusCode = snapshot.statusCode
-            requests[selectedRequestIndex].responseDuration = snapshot.duration
-            syncRequestToDatabase(requests[selectedRequestIndex], isNew: false)
-
-            // 重新生成文档
-            generateDocumentation()
-
-            statusMessage = "调试完成：\(response.statusCode) (\(Int((response.duration * 1000).rounded()))ms)"
-        } catch {
-            errorMessage = readableErrorMessage(from: error)
-            statusMessage = "调试失败"
-        }
-    }
-
-    private func saveCurrentDraft() {
-        guard let binding = selectedRequestBinding else { return }
-        let request = binding.wrappedValue
-        statusMessage = "已保存草稿：\(request.name)"
-        
-        // 同步到数据库
-        syncRequestToDatabase(request, isNew: false)
-        
-        // 生成文档
-        generateDocumentation()
-    }
-
-    private func generateDocument() {
-        guard let binding = selectedRequestBinding else { return }
-        let request = binding.wrappedValue
-
-        let markdown = """
-        # \(request.name)
-
-        - Method: \(request.method.rawValue)
-        - URL: \(request.urlString)
-
-        ## Query
-        \(request.queryText.isEmpty ? "(空)" : request.queryText)
-
-        ## Headers
-        \(request.headersText.isEmpty ? "(空)" : request.headersText)
-
-        ## Body
-        \(request.bodyText.isEmpty ? "(空)" : request.bodyText)
-        """
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(markdown, forType: .string)
-        statusMessage = "接口文档已复制到剪贴板"
-    }
-
-    private func generateDocumentation() {
-        guard let selectedProjectID,
-              let project = projects.first(where: { $0.id == selectedProjectID }) else {
-            return
-        }
-        
-        let projectRequests = requests.filter { $0.projectID == selectedProjectID }
-        
-        do {
-            let model = DocGenerator.buildDocModel(project: project, requests: projectRequests)
-            let html = HTMLRenderer().render(DocGenerator.renderMarkdown(model), title: project.name)
-            
-            guard let database = mysqlDatabase else { return }
-            let repository = try DocRepository(database: database)
-            
-            try repository.saveDocument(
-                id: project.id.uuidString,
-                projectID: project.id.uuidString,
-                title: project.name,
-                html: html
-            )
-            
-            if let url = docServer?.accessURL {
-                statusMessage = "文档已更新，访问 \(url) 查看"
-            }
-        } catch {
-            statusMessage = "文档生成失败: \(error.localizedDescription)"
-        }
-    }
-
-    private func buildRequest(
-        from requestDocument: RequestDocument,
-        variables: [String: String]
-    ) throws -> URLRequest {
-        let headers = try parseHeaders(from: requestDocument.headersText)
-        let renderedURL = try renderTemplate(requestDocument.urlString, variables: variables)
-        let urlParts = try split(renderedURL: renderedURL)
-        let tableQueryItems = try parseQueryItems(from: requestDocument.queryText, variables: variables)
-        let effectiveQueryItems = tableQueryItems.isEmpty ? urlParts.queryItems : tableQueryItems
-
-        let effectiveQueryMap = effectiveQueryItems.reduce(into: [String: String]()) { partial, item in
-            partial[item.name] = item.value ?? ""
-        }
-
-        var draft = APIRequestDraft(
-            method: requestDocument.method,
-            path: urlParts.path,
-            query: effectiveQueryMap,
-            queryItems: effectiveQueryItems,
-            headers: headers,
-            body: normalizedBody(requestDocument.bodyText),
-            variables: variables,
-            bearerToken: nil
-        )
-
-        try applyAuth(
-            requestDocument.auth,
-            variables: variables,
-            headers: &draft.headers,
-            bearerToken: &draft.bearerToken
-        )
-
-        return try RequestBuilder(baseURL: urlParts.baseURL).build(draft)
-    }
-
-    private func parseVariables(from text: String) throws -> [String: String] {
-        try parseKeyValueText(
-            text,
-            section: "Environment Variables",
-            separators: ["=", ":"],
-            example: "API_HOST=https://api.example.com"
-        )
-    }
-
-    private func parseHeaders(from text: String) throws -> [String: String] {
-        try parseKeyValueText(
-            text,
-            section: "Headers",
-            separators: [":", "="],
-            example: "Authorization: Bearer token"
-        )
-    }
-
-    private func parseQueryItems(from text: String, variables: [String: String]) throws -> [URLQueryItem] {
-        let parsed = try parseKeyValueText(
-            text,
-            section: "Query",
-            separators: ["=", ":"],
-            example: "page=1"
-        )
-
-        return try parsed.map { key, value in
-            URLQueryItem(
-                name: try renderTemplate(key, variables: variables),
-                value: try renderTemplate(value, variables: variables)
-            )
-        }
-    }
-
-    private func parseKeyValueText(
-        _ text: String,
-        section: String,
-        separators: [Character],
-        example: String
-    ) throws -> [String: String] {
-        var parsed: [String: String] = [:]
-
-        for (lineNumber, rawLine) in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
-            let line = String(rawLine).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            if line.isEmpty || line.hasPrefix("#") {
-                continue
-            }
-
-            guard let separatorIndex = line.firstIndex(where: { separators.contains($0) }) else {
-                throw RequestComposerError.invalidLine(
-                    section: section,
-                    lineNumber: lineNumber + 1,
-                    example: example
-                )
-            }
-
-            let key = String(line[..<separatorIndex]).trimmingCharacters(in: CharacterSet.whitespaces)
-            let valueStart = line.index(after: separatorIndex)
-            let value = String(line[valueStart...]).trimmingCharacters(in: CharacterSet.whitespaces)
-
-            guard !key.isEmpty else {
-                throw RequestComposerError.invalidLine(
-                    section: section,
-                    lineNumber: lineNumber + 1,
-                    example: example
-                )
-            }
-
-            parsed[String(key)] = String(value)
-        }
-
-        return parsed
-    }
-
-    private func renderTemplate(_ template: String, variables: [String: String]) throws -> String {
-        do {
-            return try templateRenderer.render(template, variables: variables)
-        } catch let error as TemplateRendererError {
-            throw AppRequestError.template(error)
-        }
-    }
-
-    private func split(renderedURL: String) throws -> (baseURL: URL, path: String, query: [String: String], queryItems: [URLQueryItem]) {
-        guard let components = URLComponents(string: renderedURL),
-              let scheme = components.scheme,
-              let host = components.host else {
-            throw AppRequestError.invalidURL(renderedURL)
-        }
-
-        var baseComponents = URLComponents()
-        baseComponents.scheme = scheme
-        baseComponents.host = host
-        baseComponents.port = components.port
-        baseComponents.user = components.user
-        baseComponents.password = components.password
-
-        guard let baseURL = baseComponents.url else {
-            throw AppRequestError.invalidURL(renderedURL)
-        }
-
-        var query: [String: String] = [:]
-        let queryItems = components.queryItems ?? []
-        for item in queryItems {
-            query[item.name] = item.value ?? ""
-        }
-
-        let path = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
-        return (baseURL, path, query, queryItems)
-    }
-
-    private func normalizedBody(_ bodyText: String) -> String? {
-        let trimmed = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : bodyText
-    }
-
-    private func applyAuth(
-        _ auth: RequestAuthConfiguration,
-        variables: [String: String],
-        headers: inout [String: String],
-        bearerToken: inout String?
-    ) throws {
-        switch auth.type {
-        case .none:
-            bearerToken = nil
-        case .bearer:
-            bearerToken = try renderRequiredField(
-                auth.bearerToken,
-                fieldName: "Bearer token",
-                variables: variables
-            )
-        case .basic:
-            let username = try renderRequiredField(
-                auth.basicUsername,
-                fieldName: "Basic username",
-                variables: variables
-            )
-            let password = try renderTemplate(auth.basicPassword, variables: variables)
-            headers = removingAuthorization(from: headers)
-            let encoded = Data("\(username):\(password)".utf8).base64EncodedString()
-            headers["Authorization"] = "Basic \(encoded)"
-            bearerToken = nil
-        case .apiKey:
-            let headerName = try renderRequiredField(
-                auth.apiKeyHeader,
-                fieldName: "API Key header",
-                variables: variables
-            )
-            let headerValue = try renderRequiredField(
-                auth.apiKeyValue,
-                fieldName: "API Key value",
-                variables: variables
-            )
-            headers[headerName] = headerValue
-            bearerToken = nil
-        }
-    }
-
-    private func renderRequiredField(
-        _ value: String,
-        fieldName: String,
-        variables: [String: String]
-    ) throws -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw RequestComposerError.emptyField(fieldName)
-        }
-
-        return try renderTemplate(trimmed, variables: variables)
-    }
-
-    private func removingAuthorization(from headers: [String: String]) -> [String: String] {
-        var filtered = headers
-        for key in filtered.keys where key.lowercased() == "authorization" {
-            filtered.removeValue(forKey: key)
-        }
-        return filtered
-    }
-
-    private func formatBody(_ data: Data) -> String {
-        guard !data.isEmpty else {
-            return "无响应体。"
-        }
-
-        if let object = try? JSONSerialization.jsonObject(with: data),
-           JSONSerialization.isValidJSONObject(object),
-           let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-           let prettyString = String(data: prettyData, encoding: .utf8) {
-            return prettyString
-        }
-
-        if let string = String(data: data, encoding: .utf8) {
-            return string
-        }
-
-        return "收到 \(data.count) 字节，响应体不是 UTF-8 文本。"
-    }
-
-    private func formatHeaders(_ headers: [String: String]) -> String {
-        if headers.isEmpty {
-            return "无响应头。"
-        }
-
-        return headers
-            .sorted(by: { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending })
-            .map { "\($0.key): \($0.value)" }
-            .joined(separator: "\n")
-    }
-
-    private func persistHistory(
-        for requestDocument: RequestDocument,
-        request: URLRequest,
-        response: RequestResponseSnapshot
-    ) {
-        let message = historyMessage(for: requestDocument, request: request, response: response)
-        historyPersistence.save(message: message, createdAt: response.timestamp)
-        loadHistory()
-    }
-
-    private func historyMessage(
-        for requestDocument: RequestDocument,
-        request: URLRequest,
-        response: RequestResponseSnapshot
-    ) -> String {
-        let urlText = request.url?.absoluteString ?? requestDocument.urlString
-        let milliseconds = Int((response.duration * 1000).rounded())
-        return "\(requestDocument.method.rawValue) \(urlText) -> \(response.statusCode) (\(milliseconds) ms)"
-    }
-
-    private func loadHistoryIfNeeded() {
-        guard !hasLoadedHistory else {
-            return
-        }
-
-        hasLoadedHistory = true
-        loadHistory()
-    }
-
-    private func loadHistory() {
-        let search = historySearchText.isEmpty ? nil : historySearchText
-        historyItems = historyPersistence.loadItems(search: search)
-    }
-
-    private func readableErrorMessage(from error: Error) -> String {
-        if let composerError = error as? RequestComposerError {
-            return composerError.localizedDescription
-        }
-
-        if let appError = error as? AppRequestError {
-            switch appError {
-            case let .invalidURL(urlString):
-                return "URL 无效：\(urlString)。请输入完整地址，例如 https://api.example.com/v1/ping。"
-            case let .template(.missingVariable(name)):
-                return "缺少变量 \(name)。请在 Environment Variables 中补充对应值。"
-            case .timeout:
-                return "请求超时。可以检查网络状况，或稍后重试。"
-            case .offline:
-                return "当前网络不可用。请确认设备已联网后再试。"
-            case .tls:
-                return "TLS / 证书校验失败。请确认目标服务证书可被系统信任。"
-            case .badResponse:
-                return "未收到可解析的 HTTP 响应。请检查目标地址、代理或服务端状态。"
-            }
-        }
-
-        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return message.isEmpty ? "发生了未识别的错误。" : message
-    }
-
-    @ViewBuilder
-    private func placeholderView(title: String, message: String) -> some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.title2.weight(.semibold))
@@ -1338,109 +446,5 @@ struct AppContainer: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(24)
-    }
-}
-
-private enum RequestComposerError: LocalizedError {
-    case invalidLine(section: String, lineNumber: Int, example: String)
-    case emptyField(String)
-
-    var errorDescription: String? {
-        switch self {
-        case let .invalidLine(section, lineNumber, example):
-            return "\(section) 第 \(lineNumber) 行格式无效。请使用类似 `\(example)` 的写法。"
-        case let .emptyField(fieldName):
-            return "\(fieldName) 不能为空。"
-        }
-    }
-}
-
-@MainActor
-private final class HistoryPersistence {
-    static let shared = HistoryPersistence.inMemory
-
-    private let database: MySQLDatabase?
-    private let repository: MySQLHistoryRepository?
-
-    init(database: MySQLDatabase) {
-        self.database = database
-        do {
-            self.repository = try MySQLHistoryRepository(database: database)
-        } catch {
-            print("HistoryRepository初始化失败: \(error)")
-            self.repository = nil
-        }
-    }
-
-    static var inMemory: HistoryPersistence {
-        HistoryPersistence(database: nil)
-    }
-
-    private init(database: MySQLDatabase?) {
-        self.database = database
-        if let database {
-            do {
-                self.repository = try MySQLHistoryRepository(database: database)
-            } catch {
-                print("HistoryRepository初始化失败: \(error)")
-                self.repository = nil
-            }
-        } else {
-            self.repository = nil
-        }
-    }
-
-    func save(message: String, createdAt: Date) {
-        guard let repository else {
-            return
-        }
-
-        do {
-            try repository.insertHistory(message: message, createdAt: createdAt)
-        } catch {
-            print("保存历史记录失败: \(error)")
-        }
-    }
-
-    func loadItems() -> [RequestHistoryItem] {
-        guard let repository else {
-            return []
-        }
-
-        do {
-            let records = try repository.fetchHistory()
-            return records
-                .reversed()
-                .map { record in
-                    RequestHistoryItem(
-                        timestamp: record.createdAt,
-                        message: record.message
-                    )
-                }
-        } catch {
-            print("加载历史记录失败: \(error)")
-            return []
-        }
-    }
-
-    func loadItems(search: String?) -> [RequestHistoryItem] {
-        guard let repository else {
-            return []
-        }
-
-        do {
-            let records = try repository.fetchHistory(search: search)
-            return records
-                .reversed()
-                .map { record in
-                    RequestHistoryItem(
-                        timestamp: record.createdAt,
-                        message: record.message
-                    )
-                }
-        } catch {
-            print("加载历史记录失败: \(error)")
-            return []
-        }
     }
 }

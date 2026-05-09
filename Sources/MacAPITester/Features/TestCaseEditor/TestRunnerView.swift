@@ -78,7 +78,7 @@ struct TestRunnerView: View {
                 VStack {
                     Spacer()
                     Text("选择一个测试结果查看详情")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             }
@@ -122,21 +122,21 @@ struct TestSuiteResultRow: View {
     var body: some View {
         HStack {
             Image(systemName: result.failedCount > 0 ? "xmark.circle.fill" : "checkmark.circle.fill")
-                .foregroundColor(result.failedCount > 0 ? .red : .green)
+                .foregroundStyle(result.failedCount > 0 ? .red : .green)
 
             VStack(alignment: .leading) {
                 Text(result.suite.name)
                     .font(.headline)
                 Text("\(result.passedCount)/\(result.totalCount) 通过")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
 
             Text(String(format: "%.2fs", result.duration))
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
     }
@@ -160,7 +160,7 @@ struct TestSuiteDetailView: View {
                     .font(.headline)
                 Text("通过率: \(String(format: "%.1f%%", result.passRate * 100))")
                     .font(.caption)
-                    .foregroundColor(result.failedCount > 0 ? .red : .green)
+                    .foregroundStyle(result.failedCount > 0 ? .red : .green)
             }
 
             Spacer()
@@ -209,7 +209,7 @@ struct TestResultRow: View {
     var body: some View {
         HStack {
             Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundColor(result.passed ? .green : .red)
+                .foregroundStyle(result.passed ? .green : .red)
 
             VStack(alignment: .leading) {
                 Text(result.testCase.name)
@@ -217,7 +217,7 @@ struct TestResultRow: View {
                 if let error = result.execution.errorMessage {
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                         .lineLimit(2)
                 }
             }
@@ -235,7 +235,7 @@ struct TestResultRow: View {
             if let responseTime = result.execution.responseTimeMs {
                 Text("\(responseTime)ms")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

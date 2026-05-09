@@ -105,7 +105,7 @@ struct ImportExportView: View {
         HStack {
             Text("支持JSON格式的Body参数导入导出")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
 
             Spacer()
         }

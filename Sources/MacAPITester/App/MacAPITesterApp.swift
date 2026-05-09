@@ -21,7 +21,7 @@ enum MacAPITesterAppMetadata {
 struct MacAPITesterApp: App {
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.activate()
     }
 
     var body: some Scene {

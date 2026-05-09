@@ -68,7 +68,7 @@ struct TestCaseEditorView: View {
         HStack {
             Text("共 \(filteredTestCases.count) 个用例")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
 
             Spacer()
         }
@@ -98,14 +98,14 @@ struct TestCaseRow: View {
     var body: some View {
         HStack {
             Image(systemName: testCase.isEnabled ? "checkmark.circle.fill" : "checkmark.circle")
-                .foregroundColor(testCase.isEnabled ? .green : .gray)
+                .foregroundStyle(testCase.isEnabled ? .green : .gray)
 
             VStack(alignment: .leading) {
                 Text(testCase.name)
                     .font(.headline)
                 Text(testCase.description)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 

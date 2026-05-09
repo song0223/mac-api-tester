@@ -54,7 +54,7 @@ struct CookiesEditorView: View {
                 cookieJar = CookieJar()
             }
             .buttonStyle(.bordered)
-            .foregroundColor(.red)
+            .foregroundStyle(.red)
         }
         .padding()
     }
@@ -143,7 +143,7 @@ struct CookieRow: View {
                     .font(.headline)
                 Text(cookie.domain)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -155,7 +155,7 @@ struct CookieRow: View {
             if cookie.isExpired {
                 Text("已过期")
                     .font(.caption2)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
             }
         }
         .padding(.vertical, 4)

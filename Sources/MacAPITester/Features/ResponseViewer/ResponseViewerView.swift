@@ -344,7 +344,7 @@ struct ResponseViewerView: View {
                     Spacer()
                     Text(historySearchText.isEmpty ? "暂无历史记录" : "未找到匹配记录")
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
@@ -357,7 +357,7 @@ struct ResponseViewerView: View {
                         Spacer()
                         Text(formatDate(item.timestamp))
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 1)
                 }
@@ -381,7 +381,10 @@ struct ResponseViewerView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copyHint = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copyHint = false }
+        Task {
+            try await Task.sleep(for: .milliseconds(1200))
+            copyHint = false
+        }
     }
 
     private func toggleEditMode() {

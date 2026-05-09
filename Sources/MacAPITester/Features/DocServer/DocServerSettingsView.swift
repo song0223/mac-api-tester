@@ -34,14 +34,14 @@ struct DocServerSettingsView: View {
                     HStack {
                         Text("访问地址:")
                         Text(server.accessURL)
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                     }
 
                     if let localURL = server.localNetworkURL {
                         HStack {
                             Text("局域网地址:")
                             Text(localURL)
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                         }
                     }
                 }
