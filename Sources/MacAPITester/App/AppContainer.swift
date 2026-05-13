@@ -213,14 +213,20 @@ struct HistorySheet: View {
 
 struct DatabaseSettingsSheet: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
+    @State private var isPresented = true
 
     var body: some View {
         DatabaseSettingsView(
-            isPresented: .constant(true),
+            isPresented: $isPresented,
             onSave: {
                 dismiss()
             }
         )
+        .onChange(of: isPresented) { _, newValue in
+            if !newValue {
+                dismiss()
+            }
+        }
     }
 }
 
