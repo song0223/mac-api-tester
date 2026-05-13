@@ -103,11 +103,7 @@ final class HTMLRenderer {
                     tableRows.append("<thead><tr>\(header)</tr></thead>")
                     isFirstTableRow = false
                 } else {
-                    let row = cells.enumerated().map { index, cell in
-                        // 示例值列（通常是第3列）添加截断样式
-                        let cellClass = (index == 2 && cell.count > 50) ? " class=\"truncate\"" : ""
-                        return "<td\(cellClass)>\(formatInline(cell))</td>"
-                    }.joined()
+                    let row = cells.map { "<td>\(formatInline($0))</td>" }.joined()
                     tableRows.append("<tr>\(row)</tr>")
                 }
                 continue
@@ -661,31 +657,6 @@ final class HTMLRenderer {
                 font-size: 14px;
             }
 
-            td.truncate {
-                max-width: 200px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                cursor: pointer;
-                position: relative;
-            }
-
-            td.truncate::after {
-                content: '▼';
-                font-size: 10px;
-                color: #86868b;
-                margin-left: 4px;
-            }
-
-            td.truncate.expanded {
-                white-space: normal;
-                overflow: visible;
-            }
-
-            td.truncate.expanded::after {
-                content: '▲';
-            }
-
             tr:last-child td {
                 border-bottom: none;
             }
@@ -941,13 +912,6 @@ final class HTMLRenderer {
                     const sectionId = this.getAttribute('href').substring(1);
                     showAPI(sectionId);
                 });
-            });
-
-            // 点击展开/折叠表格单元格
-            document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('truncate')) {
-                    e.target.classList.toggle('expanded');
-                }
             });
         </script>
         """

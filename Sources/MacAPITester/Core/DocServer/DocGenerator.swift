@@ -118,8 +118,7 @@ enum DocGenerator {
     private static func renderSection(_ section: APIDocSection) -> String {
         var lines: [String] = []
 
-        // 接口名称：只显示 URL，不显示名称
-        lines.append("## \(section.method) \(section.url)")
+        lines.append("## \(section.method) \(section.name)")
         lines.append("")
         lines.append("**URL:** `\(section.method) \(section.url)`")
         lines.append("")
@@ -138,8 +137,7 @@ enum DocGenerator {
             lines.append("| 参数名 | 类型 | 示例值 | 必填 | 描述 |")
             lines.append("|--------|------|--------|------|------|")
             for param in section.queryParams {
-                let example = truncateValue(param.example, maxLength: 50)
-                lines.append("| \(param.name) | \(param.type) | \(example) | \(param.required ? "是" : "否") | \(param.description) |")
+                lines.append("| \(param.name) | \(param.type) | \(param.example) | \(param.required ? "是" : "否") | \(param.description) |")
             }
             lines.append("")
         }
@@ -150,8 +148,7 @@ enum DocGenerator {
             lines.append("| Header | 值 |")
             lines.append("|--------|-----|")
             for header in section.headers {
-                let value = truncateValue(header.description, maxLength: 50)
-                lines.append("| \(header.name) | \(value) |")
+                lines.append("| \(header.name) | \(header.description) |")
             }
             lines.append("")
         }
@@ -163,8 +160,7 @@ enum DocGenerator {
         lines.append("|--------|------|--------|------|------|")
         if !section.bodyParams.isEmpty {
             for param in section.bodyParams {
-                let example = truncateValue(param.example, maxLength: 50)
-                lines.append("| \(param.name) | \(param.type) | \(example) | \(param.required ? "是" : "否") | \(param.description) |")
+                lines.append("| \(param.name) | \(param.type) | \(param.example) | \(param.required ? "是" : "否") | \(param.description) |")
             }
         }
         lines.append("")
@@ -190,14 +186,5 @@ enum DocGenerator {
         }
 
         return lines.joined(separator: "\n")
-    }
-
-    /// 截断过长的值
-    private static func truncateValue(_ value: String, maxLength: Int) -> String {
-        if value.count <= maxLength {
-            return value
-        }
-        let truncated = String(value.prefix(maxLength))
-        return "\(truncated)..."
     }
 }
