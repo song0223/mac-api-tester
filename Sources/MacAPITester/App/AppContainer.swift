@@ -156,6 +156,8 @@ struct SheetDestinationView: View {
             CurlImportSheet(store: store)
         case .history:
             HistorySheet(store: store)
+        case .databaseSettings:
+            DatabaseSettingsSheet()
         }
     }
 }
@@ -205,6 +207,20 @@ struct HistorySheet: View {
             historySearchText: $store.historySearchText,
             onSearch: { store.loadHistory() },
             onDismiss: { dismiss() }
+        )
+    }
+}
+
+struct DatabaseSettingsSheet: View {
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        DatabaseSettingsView(
+            isPresented: .constant(true),
+            onSave: {
+                // 重启应用以应用新配置
+                NSApplication.shared.terminate(nil)
+            }
         )
     }
 }
@@ -380,6 +396,9 @@ struct BottomActionBar: View {
                 }
                 ToolButton(icon: "square.and.arrow.up", label: "cURL") {
                     store.presentedSheet = .curlImport
+                }
+                ToolButton(icon: "externaldrive.connected.to.line.below", label: "数据库") {
+                    store.presentedSheet = .databaseSettings
                 }
             }
 

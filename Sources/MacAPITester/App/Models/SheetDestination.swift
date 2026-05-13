@@ -9,6 +9,7 @@ enum SheetDestination: Identifiable, Hashable {
     case environmentEditor
     case curlImport
     case history
+    case databaseSettings
 
     var id: String {
         switch self {
@@ -26,6 +27,8 @@ enum SheetDestination: Identifiable, Hashable {
             return "curlImport"
         case .history:
             return "history"
+        case .databaseSettings:
+            return "databaseSettings"
         }
     }
 

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "swiftui-expert-skill": {
+      "source": "avdlee/swiftui-agent-skill",
+      "sourceType": "github",
+      "skillPath": "swiftui-expert-skill/SKILL.md",
+      "computedHash": "9db9a694b7354dea993bff22d038bc39e4d64b28a9c598b84793f2e1153db1cb"
+    },
+    "swiftui-performance-audit": {
+      "source": "dimillian/skills",
+      "sourceType": "github",
+      "skillPath": "swiftui-performance-audit/SKILL.md",
+      "computedHash": "4c153a7401d4d878fad3b7b83ca3d29f43245f8404dd34b7beb400cdfcab46f7"
+    },
+    "swiftui-ui-patterns": {
+      "source": "dimillian/skills",
+      "sourceType": "github",
+      "skillPath": "swiftui-ui-patterns/SKILL.md",
+      "computedHash": "f58d51fe4569f9eff10c45a4ed6859c9f5e3eefca7827e819de840141da67995"
+    }
+  }
+}
