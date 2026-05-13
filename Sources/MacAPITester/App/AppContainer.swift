@@ -393,9 +393,6 @@ struct BottomActionBar: View {
                 ToolButton(icon: "checklist", label: "用例") {
                     store.presentedSheet = .testCaseEditor(requestID: store.selectedRequestID ?? UUID())
                 }
-                ToolButton(icon: "doc.richtext", label: "文档设置") {
-                    store.presentedSheet = .docServerSettings
-                }
                 ToolButton(icon: "slider.horizontal.3", label: "环境") {
                     store.presentedSheet = .environmentEditor
                 }
