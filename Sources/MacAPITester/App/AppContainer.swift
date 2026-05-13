@@ -218,8 +218,7 @@ struct DatabaseSettingsSheet: View {
         DatabaseSettingsView(
             isPresented: .constant(true),
             onSave: {
-                // 重启应用以应用新配置
-                NSApplication.shared.terminate(nil)
+                dismiss()
             }
         )
     }

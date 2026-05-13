@@ -1,9 +1,9 @@
 {
-  "database": {
-    "host": "127.0.0.1",
-    "port": 3306,
-    "username": "root",
-    "password": "",
-    "database": "mac_api_tester"
+  "database" : {
+    "username" : "root",
+    "host" : "47.100.236.45",
+    "port" : 3306,
+    "database" : "mac_api_tester",
+    "password" : "Netime@2023"
   }
 }

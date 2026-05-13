@@ -11,6 +11,7 @@ struct DatabaseSettingsView: View {
     @State private var database: String = ""
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showSuccess = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -31,6 +32,12 @@ struct DatabaseSettingsView: View {
                     .font(.caption)
             }
 
+            if showSuccess {
+                Text("保存成功，重启后生效")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
+
             HStack {
                 Button("取消") {
                     isPresented = false
@@ -39,7 +46,7 @@ struct DatabaseSettingsView: View {
 
                 Spacer()
 
-                Button("保存并重启") {
+                Button("保存") {
                     saveConfig()
                 }
                 .buttonStyle(.borderedProminent)
@@ -87,8 +94,13 @@ struct DatabaseSettingsView: View {
         let configPath = getConfigPath()
         do {
             try data.write(to: URL(fileURLWithPath: configPath))
-            isPresented = false
-            onSave()
+            showError = false
+            showSuccess = true
+            Task {
+                try await Task.sleep(for: .seconds(2))
+                isPresented = false
+                onSave()
+            }
         } catch {
             errorMessage = "保存失败: \(error.localizedDescription)"
             showError = true
