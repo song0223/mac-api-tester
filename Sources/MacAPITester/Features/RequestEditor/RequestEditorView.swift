@@ -22,12 +22,31 @@ private enum BodyMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ParamType: String, CaseIterable, Identifiable {
+    case string = "string"
+    case file = "file"
+    case array = "array"
+    case object = "object"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .string: return "String"
+        case .file: return "File"
+        case .array: return "Array"
+        case .object: return "Object"
+        }
+    }
+}
+
 private struct BodyParamRow: Identifiable, Equatable {
     let id: UUID
     var enabled: Bool
     var name: String
     var value: String
-    var type: String
+    var type: ParamType
+    var filePath: String?
     var required: Bool
     var description: String
 
@@ -36,7 +55,8 @@ private struct BodyParamRow: Identifiable, Equatable {
         enabled: Bool = true,
         name: String = "",
         value: String = "",
-        type: String = "string",
+        type: ParamType = .string,
+        filePath: String? = nil,
         required: Bool = true,
         description: String = ""
     ) {
@@ -45,6 +65,7 @@ private struct BodyParamRow: Identifiable, Equatable {
         self.name = name
         self.value = value
         self.type = type
+        self.filePath = filePath
         self.required = required
         self.description = description
     }
@@ -158,7 +179,7 @@ struct RequestEditorView: View {
                             BodyParameter(
                                 name: $0.name,
                                 value: $0.value,
-                                type: $0.type,
+                                type: $0.type.rawValue,
                                 required: $0.required,
                                 description: $0.description
                             )
@@ -169,7 +190,7 @@ struct RequestEditorView: View {
                             BodyParamRow(
                                 name: $0.name,
                                 value: $0.value,
-                                type: $0.type,
+                                type: ParamType(rawValue: $0.type) ?? .string,
                                 required: $0.required,
                                 description: $0.description
                             )
@@ -384,14 +405,34 @@ struct RequestEditorView: View {
                                     .inputFieldStyle()
                             }
                             tableFlexibleCell {
-                                TextField("", text: $row.value)
-                                    .inputFieldStyle()
+                                if row.type == .file {
+                                    HStack(spacing: 4) {
+                                        TextField("选择文件", text: Binding(
+                                            get: { row.filePath ?? "" },
+                                            set: { row.filePath = $0 }
+                                        ))
+                                        .inputFieldStyle()
+                                        .disabled(true)
+
+                                        Button {
+                                            selectFile(for: $row)
+                                        } label: {
+                                            Image(systemName: "folder")
+                                                .font(.system(size: 12))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .pointingHandCursor()
+                                    }
+                                } else {
+                                    TextField("", text: $row.value)
+                                        .inputFieldStyle()
+                                }
                             }
                             tableCell(width: 120) {
                                 Picker("", selection: $row.type) {
-                                    Text("string").tag("string")
-                                    Text("number").tag("number")
-                                    Text("boolean").tag("boolean")
+                                    ForEach(ParamType.allCases) { type in
+                                        Text(type.displayName).tag(type)
+                                    }
                                 }
                                 .pillPickerStyle()
                             }
@@ -745,11 +786,52 @@ struct RequestEditorView: View {
     }
 
     private func parseBodyRows(from text: String) -> [BodyParamRow] {
-        parseKeyValueLines(text, separators: ["="]).map { BodyParamRow(name: $0.key, value: $0.value) }
+        // 尝试 JSON 格式
+        if let data = text.data(using: .utf8),
+           let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return params.compactMap { dict in
+                guard let name = dict["name"] as? String, !name.isEmpty else { return nil }
+                let value = dict["value"] as? String ?? ""
+                let typeStr = dict["type"] as? String ?? "string"
+                let type = ParamType(rawValue: typeStr) ?? .string
+                let filePath = dict["filePath"] as? String
+                let required = dict["required"] as? Bool ?? true
+                let description = dict["description"] as? String ?? ""
+                return BodyParamRow(
+                    name: name,
+                    value: value,
+                    type: type,
+                    filePath: filePath?.isEmpty == true ? nil : filePath,
+                    required: required,
+                    description: description
+                )
+            }
+        }
+
+        // 兼容旧格式 key=value
+        return parseKeyValueLines(text, separators: ["="]).map { BodyParamRow(name: $0.key, value: $0.value) }
     }
 
     private func parseQueryRows(from text: String) -> [QueryParamRow] {
-        parseKeyValueLines(text, separators: ["="]).map { QueryParamRow(name: $0.key, value: $0.value) }
+        // 尝试 JSON 格式
+        if let data = text.data(using: .utf8),
+           let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return params.compactMap { dict in
+                guard let name = dict["name"] as? String, !name.isEmpty else { return nil }
+                let value = dict["value"] as? String ?? ""
+                let required = dict["required"] as? Bool ?? true
+                let description = dict["description"] as? String ?? ""
+                return QueryParamRow(
+                    name: name,
+                    value: value,
+                    required: required,
+                    description: description
+                )
+            }
+        }
+
+        // 兼容旧格式 key=value
+        return parseKeyValueLines(text, separators: ["="]).map { QueryParamRow(name: $0.key, value: $0.value) }
     }
 
     private func parseHeaderRows(from text: String) -> [HeaderParamRow] {
@@ -769,6 +851,18 @@ struct RequestEditorView: View {
                 let value = String(line[valueStart...]).trimmingCharacters(in: .whitespaces)
                 guard !key.isEmpty else { return nil }
                 return (key, value)
+        }
+    }
+
+    private func selectFile(for row: Binding<BodyParamRow>) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            row.wrappedValue.filePath = url.path
+            row.wrappedValue.value = url.lastPathComponent
         }
     }
 
@@ -797,17 +891,43 @@ struct RequestEditorView: View {
     }
 
     private func serializeBodyRows(_ rows: [BodyParamRow]) -> String {
-        rows
+        let params = rows
             .filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "\($0.name)=\($0.value)" }
-            .joined(separator: "\n")
+            .map { row in
+                [
+                    "name": row.name,
+                    "value": row.value,
+                    "type": row.type.rawValue,
+                    "filePath": row.filePath ?? "",
+                    "required": row.required,
+                    "description": row.description
+                ] as [String: Any]
+            }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: params, options: .sortedKeys),
+              let json = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return json
     }
 
     private func serializeQueryRows(_ rows: [QueryParamRow]) -> String {
-        rows
+        let params = rows
             .filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "\($0.name)=\($0.value)" }
-            .joined(separator: "\n")
+            .map { row in
+                [
+                    "name": row.name,
+                    "value": row.value,
+                    "required": row.required,
+                    "description": row.description
+                ] as [String: Any]
+            }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: params, options: .sortedKeys),
+              let json = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return json
     }
 
     private func serializeHeaderRows(_ rows: [HeaderParamRow]) -> String {
