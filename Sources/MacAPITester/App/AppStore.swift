@@ -476,7 +476,7 @@ final class AppStore {
 
         do {
             let model = DocGenerator.buildDocModel(project: project, requests: projectRequests)
-            let html = HTMLRenderer().render(DocGenerator.renderMarkdown(model), title: project.name)
+            let markdown = DocGenerator.renderMarkdown(model)
 
             guard let database = mysqlDatabase else { return }
             let repository = try DocRepository(database: database)
@@ -485,7 +485,7 @@ final class AppStore {
                 id: project.id.uuidString,
                 projectID: project.id.uuidString,
                 title: project.name,
-                html: html
+                html: markdown
             )
 
             if let url = docServer?.accessURL {
