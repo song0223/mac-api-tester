@@ -17,3 +17,6 @@ CLAUDE.md
 
 # Config (contains database credentials)
 config.json
+
+# AI Skills
+.agents/
