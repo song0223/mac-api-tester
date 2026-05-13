@@ -14,3 +14,6 @@ docs/
 .claude/
 .codex/
 CLAUDE.md
+
+# Config (contains database credentials)
+config.json
