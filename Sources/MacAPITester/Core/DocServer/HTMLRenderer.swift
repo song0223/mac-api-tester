@@ -23,6 +23,7 @@ final class HTMLRenderer {
             <div class="container">
                 <nav class="sidebar">
                     <div class="sidebar-header">
+                        <a href="/" class="back-link">← 返回文档列表</a>
                         <h2 class="sidebar-title">\(escapeHTML(title))</h2>
                         <div class="search-box">
                             <input type="text" id="searchInput" placeholder="搜索接口..." oninput="filterAPIs()" autocomplete="off">
@@ -404,6 +405,18 @@ final class HTMLRenderer {
                 z-index: 1;
             }
 
+            .back-link {
+                display: inline-block;
+                font-size: 13px;
+                color: #0071e3;
+                text-decoration: none;
+                margin-bottom: 12px;
+            }
+
+            .back-link:hover {
+                text-decoration: underline;
+            }
+
             .sidebar-title {
                 font-size: 18px;
                 font-weight: 600;
@@ -756,6 +769,10 @@ final class HTMLRenderer {
                 .sidebar-header {
                     background: #1c1c1e;
                     border-bottom-color: #38383a;
+                }
+
+                .back-link {
+                    color: #0a84ff;
                 }
 
                 .sidebar-title {
