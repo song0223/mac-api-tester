@@ -8,8 +8,18 @@ final class AppStore {
     // MARK: - 子 Store
 
     let projectStore = ProjectStore()
-    let environmentStore = EnvironmentStore()
-    let historyStore = HistoryStore()
+
+    // MARK: - 环境变量状态
+
+    var environments: [Environment] = []
+    var activeEnvironmentID: UUID?
+    var environmentRepository: MySQLEnvironmentRepository?
+
+    // MARK: - 历史记录状态
+
+    var historyItems: [RequestHistoryItem] = []
+    var historySearchText = ""
+    var historyPersistence: HistoryPersistence
 
     // MARK: - 响应状态
 
@@ -86,25 +96,6 @@ final class AppStore {
         projectStore.selectedRequestBinding
     }
 
-    var environments: [Environment] {
-        get { environmentStore.environments }
-        set { environmentStore.environments = newValue }
-    }
-
-    var activeEnvironmentID: UUID? {
-        get { environmentStore.activeEnvironmentID }
-        set { environmentStore.activeEnvironmentID = newValue }
-    }
-
-    var historyItems: [RequestHistoryItem] {
-        historyStore.historyItems
-    }
-
-    var historySearchText: String {
-        get { historyStore.historySearchText }
-        set { historyStore.historySearchText = newValue }
-    }
-
     // MARK: - 初始化
 
     init() {
@@ -112,6 +103,7 @@ final class AppStore {
         let manager = CookieManager(storage: storage)
         self.cookieManager = manager
         self.cookieJar = manager.cookieJar
+        self.historyPersistence = HistoryPersistence.inMemory
 
         do {
             print("正在初始化MySQL数据库...")
@@ -122,12 +114,12 @@ final class AppStore {
             print("数据库迁移完成")
             self.mysqlDatabase = mysqlDatabase
 
-            // 初始化子 Store
-            historyStore.historyPersistence = HistoryPersistence(database: mysqlDatabase)
-            testCaseManager = TestCaseManager(database: mysqlDatabase)
+            // 初始化仓库
+            self.historyPersistence = HistoryPersistence(database: mysqlDatabase)
+            self.testCaseManager = TestCaseManager(database: mysqlDatabase)
             projectStore.projectRepository = try MySQLProjectRepository(database: mysqlDatabase)
             projectStore.requestDocumentRepository = try MySQLRequestDocumentRepository(database: mysqlDatabase)
-            environmentStore.environmentRepository = try MySQLEnvironmentRepository(database: mysqlDatabase)
+            self.environmentRepository = try MySQLEnvironmentRepository(database: mysqlDatabase)
             print("仓库初始化完成")
 
             let server = DocServer(database: mysqlDatabase)
@@ -139,10 +131,10 @@ final class AppStore {
             let allRequestDocuments = try projectStore.requestDocumentRepository?.fetchAllRequestDocuments() ?? []
 
             // 加载环境变量
-            let loadedEnvironments = try environmentStore.environmentRepository?.fetchAllEnvironments() ?? []
+            let loadedEnvironments = try environmentRepository?.fetchAllEnvironments() ?? []
             var envs: [Environment] = []
             for envRecord in loadedEnvironments {
-                let variables = try environmentStore.environmentRepository?.fetchVariables(envId: envRecord.id) ?? []
+                let variables = try environmentRepository?.fetchVariables(envId: envRecord.id) ?? []
                 let env = Environment(
                     id: UUID(uuidString: envRecord.id) ?? UUID(),
                     name: envRecord.name,
@@ -158,8 +150,8 @@ final class AppStore {
                 )
                 envs.append(env)
             }
-            environmentStore.environments = envs
-            environmentStore.activeEnvironmentID = envs.first(where: { $0.isActive })?.id
+            self.environments = envs
+            self.activeEnvironmentID = envs.first(where: { $0.isActive })?.id
 
             if loadedProjects.isEmpty {
                 // 数据库为空，创建默认项目
@@ -320,7 +312,51 @@ final class AppStore {
     }
 
     func syncEnvironmentsToDatabase() {
-        environmentStore.syncEnvironmentsToDatabase()
+        guard let environmentRepository else { return }
+
+        do {
+            // 获取数据库中现有的环境
+            let existingEnvs = try environmentRepository.fetchAllEnvironments()
+            let existingEnvIDs = Set(existingEnvs.map { $0.id })
+            let currentEnvIDs = Set(environments.map { $0.id.uuidString })
+
+            // 删除不再存在的环境
+            for envID in existingEnvIDs where !currentEnvIDs.contains(envID) {
+                try environmentRepository.deleteEnvironment(id: envID)
+            }
+
+            // 创建或更新环境
+            for env in environments {
+                let envID = env.id.uuidString
+                if existingEnvIDs.contains(envID) {
+                    try environmentRepository.updateEnvironment(id: envID, name: env.name, isActive: env.isActive)
+                } else {
+                    try environmentRepository.createEnvironment(id: envID, name: env.name, isActive: env.isActive)
+                }
+
+                // 同步环境变量
+                let existingVars = try environmentRepository.fetchVariables(envId: envID)
+                let existingVarIDs = Set(existingVars.map { $0.id })
+                let currentVarIDs = Set(env.variables.map { $0.id.uuidString })
+
+                // 删除不再存在的变量
+                for varID in existingVarIDs where !currentVarIDs.contains(varID) {
+                    try environmentRepository.deleteVariable(id: varID)
+                }
+
+                // 创建或更新变量
+                for variable in env.variables {
+                    let varID = variable.id.uuidString
+                    if existingVarIDs.contains(varID) {
+                        try environmentRepository.updateVariable(id: varID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
+                    } else {
+                        try environmentRepository.createVariable(id: varID, envId: envID, keyName: variable.key, value: variable.value, enabled: variable.enabled)
+                    }
+                }
+            }
+        } catch {
+            print("同步环境变量到数据库失败: \(error)")
+        }
     }
 
     // MARK: - cURL 导入
@@ -360,7 +396,7 @@ final class AppStore {
 
         do {
             var variables = try parseVariables(from: requestDocument.variablesText)
-            variables = environmentStore.mergeVariables(with: variables)
+            variables = mergeEnvironmentVariables(with: variables)
 
             let urlRequest = try buildRequest(from: requestDocument, variables: variables)
             let response = try await httpClient.send(urlRequest)
@@ -373,7 +409,7 @@ final class AppStore {
             )
 
             latestResponse = snapshot
-            historyStore.persistHistory(for: requestDocument, request: urlRequest, response: snapshot)
+            persistHistory(for: requestDocument, request: urlRequest, response: snapshot)
 
             // 保存响应内容到请求文档
             requests[selectedRequestIndex].responseBody = snapshot.bodyText
@@ -463,11 +499,41 @@ final class AppStore {
     // MARK: - 历史记录
 
     func loadHistoryIfNeeded() {
-        historyStore.loadHistoryIfNeeded()
+        loadHistory()
     }
 
     func loadHistory() {
-        historyStore.loadHistory()
+        let search = historySearchText.isEmpty ? nil : historySearchText
+        historyItems = historyPersistence.loadItems(search: search)
+    }
+
+    func persistHistory(
+        for requestDocument: RequestDocument,
+        request: URLRequest,
+        response: RequestResponseSnapshot
+    ) {
+        let urlText = request.url?.absoluteString ?? requestDocument.urlString
+        let milliseconds = Int((response.duration * 1000).rounded())
+        let message = "\(requestDocument.method.rawValue) \(urlText) -> \(response.statusCode) (\(milliseconds) ms)"
+        historyPersistence.save(message: message, createdAt: response.timestamp)
+        loadHistory()
+    }
+
+    // MARK: - 环境变量合并
+
+    func mergeEnvironmentVariables(with requestVariables: [String: String]) -> [String: String] {
+        var variables = requestVariables
+
+        if let envID = activeEnvironmentID,
+           let env = environments.first(where: { $0.id == envID }) {
+            for v in env.variables where v.enabled && !v.key.isEmpty {
+                if variables[v.key] == nil {
+                    variables[v.key] = v.value
+                }
+            }
+        }
+
+        return variables
     }
 
     // MARK: - 请求构建辅助方法
