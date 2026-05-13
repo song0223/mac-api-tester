@@ -598,6 +598,20 @@ final class AppStore {
     }
 
     func parseQueryItems(from text: String, variables: [String: String]) throws -> [URLQueryItem] {
+        // 尝试 JSON 格式
+        if let data = text.data(using: .utf8),
+           let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return try params.compactMap { dict -> URLQueryItem? in
+                guard let name = dict["name"] as? String, !name.isEmpty else { return nil }
+                let value = dict["value"] as? String ?? ""
+                return URLQueryItem(
+                    name: try renderTemplate(name, variables: variables),
+                    value: try renderTemplate(value, variables: variables)
+                )
+            }
+        }
+
+        // 兼容旧格式 key=value
         let parsed = try parseKeyValueText(
             text,
             section: "Query",
