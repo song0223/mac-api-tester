@@ -32,10 +32,10 @@ final class DocRepository: MySQLRepository {
         )
     }
 
-    func fetchDocument(projectID: String) throws -> MySQLDocRecord? {
+    func fetchDocument(id: String) throws -> MySQLDocRecord? {
         let results = try database.query(
-            "SELECT id, project_id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1",
-            parameters: [.string(projectID)]
+            "SELECT id, project_id, title, html_content FROM api_documents WHERE id = ? LIMIT 1",
+            parameters: [.string(id)]
         )
 
         guard let row = results.first,
@@ -51,7 +51,7 @@ final class DocRepository: MySQLRepository {
 
     func fetchDocuments(projectID: String) throws -> [MySQLDocRecord] {
         let results = try database.query(
-            "SELECT id, project_id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY updated_at DESC",
+            "SELECT id, project_id, title, html_content FROM api_documents WHERE project_id = ? ORDER BY title",
             parameters: [.string(projectID)]
         )
 
@@ -67,7 +67,7 @@ final class DocRepository: MySQLRepository {
     }
 
     func fetchAllDocuments() throws -> [MySQLDocRecord] {
-        let results = try database.query("SELECT id, project_id, title, html_content FROM api_documents ORDER BY updated_at DESC")
+        let results = try database.query("SELECT id, project_id, title, html_content FROM api_documents ORDER BY title")
 
         return results.compactMap { row in
             guard let id = row["id"] as? String,
@@ -84,6 +84,13 @@ final class DocRepository: MySQLRepository {
         try database.execute(
             "DELETE FROM api_documents WHERE id = ?",
             parameters: [.string(id)]
+        )
+    }
+
+    func deleteDocuments(projectID: String) throws {
+        try database.execute(
+            "DELETE FROM api_documents WHERE project_id = ?",
+            parameters: [.string(projectID)]
         )
     }
 }

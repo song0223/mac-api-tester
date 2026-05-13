@@ -475,21 +475,27 @@ final class AppStore {
         let projectRequests = requests.filter { $0.projectID == selectedProjectID }
 
         do {
-            let model = DocGenerator.buildDocModel(project: project, requests: projectRequests)
-            let markdown = DocGenerator.renderMarkdown(model)
-
             guard let database = mysqlDatabase else { return }
             let repository = try DocRepository(database: database)
 
-            try repository.saveDocument(
-                id: project.id.uuidString,
-                projectID: project.id.uuidString,
-                title: project.name,
-                html: markdown
-            )
+            // 删除该项目的旧文档
+            try repository.deleteDocuments(projectID: project.id.uuidString)
+
+            // 每个接口单独保存
+            for request in projectRequests {
+                let model = DocGenerator.buildDocModel(project: project, requests: [request])
+                let markdown = DocGenerator.renderMarkdown(model)
+
+                try repository.saveDocument(
+                    id: request.id.uuidString,
+                    projectID: project.id.uuidString,
+                    title: request.name,
+                    html: markdown
+                )
+            }
 
             if let url = docServer?.accessURL {
-                statusMessage = "文档已更新，访问 \(url) 查看"
+                statusMessage = "文档已更新，共 \(projectRequests.count) 个接口，访问 \(url) 查看"
             }
         } catch {
             statusMessage = "文档生成失败: \(error.localizedDescription)"

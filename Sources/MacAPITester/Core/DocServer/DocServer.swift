@@ -188,10 +188,19 @@ final class HTTPHandler: ChannelInboundHandler {
     private func serveDocumentPage(projectID: String, context: ChannelHandlerContext) {
         do {
             let repository = try DocRepository(database: database)
+            let documents = try repository.fetchDocuments(projectID: projectID)
 
-            if let document = try repository.fetchDocument(projectID: projectID) {
-                // Wrap with back button
-                let html = wrapWithBackButton(document.htmlContent, title: document.title)
+            if !documents.isEmpty {
+                // 获取项目名称（使用第一个文档的标题）
+                let title = documents.first?.title ?? "API 文档"
+
+                // 合并所有接口文档
+                var markdown = "# API文档 - \(title)\n\n"
+                for doc in documents {
+                    markdown += doc.htmlContent + "\n\n---\n\n"
+                }
+
+                let html = HTMLRenderer().render(markdown, title: title)
                 sendResponse(html: html, context: context)
             } else {
                 sendResponse(html: "<h1>文档不存在</h1><p>ProjectID: \(projectID)</p>", status: .notFound, context: context)
@@ -199,52 +208,6 @@ final class HTTPHandler: ChannelInboundHandler {
         } catch {
             sendResponse(html: "<h1>服务器错误</h1><p>\(error.localizedDescription)</p>", status: .internalServerError, context: context)
         }
-    }
-
-    private func wrapWithBackButton(_ html: String, title: String) -> String {
-        // If it's already a full HTML page, add a back button inside
-        if html.contains("<html") {
-            // Insert back button after <body>
-            return html.replacingOccurrences(
-                of: "<body>",
-                with: """
-                <body>
-                <div style="position:fixed;top:0;left:0;right:0;z-index:1000;background:#fff;border-bottom:1px solid #e0e0e0;padding:10px 20px;display:flex;align-items:center;gap:12px;">
-                    <a href="/" style="color:#0066cc;text-decoration:none;font-size:14px;">← 返回首页</a>
-                    <span style="color:#666;font-size:14px;">\(title)</span>
-                </div>
-                <div style="margin-top:50px;">
-                """
-            )
-        }
-        // If it's just a fragment, wrap it with a full page
-        return """
-        <!DOCTYPE html>
-        <html lang="zh-CN">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>\(title)</title>
-            <style>
-                body { font-family: -apple-system, sans-serif; margin: 0; padding: 0; }
-                .nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: #fff; border-bottom: 1px solid #e0e0e0; padding: 10px 20px; display: flex; align-items: center; gap: 12px; }
-                .nav-bar a { color: #0066cc; text-decoration: none; font-size: 14px; }
-                .nav-bar a:hover { text-decoration: underline; }
-                .nav-bar span { color: #666; font-size: 14px; }
-                .content { margin-top: 50px; padding: 20px; }
-            </style>
-        </head>
-        <body>
-            <div class="nav-bar">
-                <a href="/">← 返回首页</a>
-                <span>\(title)</span>
-            </div>
-            <div class="content">
-                \(html)
-            </div>
-        </body>
-        </html>
-        """
     }
 
     private func serve404(context: ChannelHandlerContext) {
