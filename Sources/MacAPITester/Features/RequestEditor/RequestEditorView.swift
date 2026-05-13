@@ -268,12 +268,6 @@ struct RequestEditorView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.black.opacity(0.08), lineWidth: 1)
             )
-
-            if let errorMessage, !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
         }
         .padding(4)
     }
