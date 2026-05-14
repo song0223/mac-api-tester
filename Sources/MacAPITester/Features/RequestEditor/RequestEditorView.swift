@@ -791,7 +791,9 @@ struct RequestEditorView: View {
                 let filePath = dict["filePath"] as? String
                 let required = dict["required"] as? Bool ?? true
                 let description = dict["description"] as? String ?? ""
+                let enabled = dict["enabled"] as? Bool ?? true
                 return BodyParamRow(
+                    enabled: enabled,
                     name: name,
                     value: value,
                     type: type,
@@ -815,7 +817,9 @@ struct RequestEditorView: View {
                 let value = dict["value"] as? String ?? ""
                 let required = dict["required"] as? Bool ?? true
                 let description = dict["description"] as? String ?? ""
+                let enabled = dict["enabled"] as? Bool ?? true
                 return QueryParamRow(
+                    enabled: enabled,
                     name: name,
                     value: value,
                     required: required,
@@ -886,7 +890,7 @@ struct RequestEditorView: View {
 
     private func serializeBodyRows(_ rows: [BodyParamRow]) -> String {
         let params = rows
-            .filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map { row in
                 [
                     "name": row.name,
@@ -894,7 +898,8 @@ struct RequestEditorView: View {
                     "type": row.type.rawValue,
                     "filePath": row.filePath ?? "",
                     "required": row.required,
-                    "description": row.description
+                    "description": row.description,
+                    "enabled": row.enabled
                 ] as [String: Any]
             }
 
@@ -907,13 +912,14 @@ struct RequestEditorView: View {
 
     private func serializeQueryRows(_ rows: [QueryParamRow]) -> String {
         let params = rows
-            .filter { $0.enabled && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map { row in
                 [
                     "name": row.name,
                     "value": row.value,
                     "required": row.required,
-                    "description": row.description
+                    "description": row.description,
+                    "enabled": row.enabled
                 ] as [String: Any]
             }
 

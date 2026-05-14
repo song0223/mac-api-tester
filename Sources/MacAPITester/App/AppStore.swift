@@ -398,7 +398,16 @@ final class AppStore {
             var variables = try parseVariables(from: requestDocument.variablesText)
             variables = mergeEnvironmentVariables(with: variables)
 
-            let urlRequest = try buildRequest(from: requestDocument, variables: variables)
+            var urlRequest = try buildRequest(from: requestDocument, variables: variables)
+            print("🔍 请求 URL: \(urlRequest.url?.absoluteString ?? "nil")")
+            print("🔍 请求方法: \(urlRequest.httpMethod ?? "nil")")
+            print("🔍 请求头: \(urlRequest.allHTTPHeaderFields ?? [:])")
+
+            // GET 请求不应该有 body
+            if urlRequest.httpMethod == "GET" {
+                urlRequest.httpBody = nil
+            }
+
             let response = try await httpClient.send(urlRequest)
             let snapshot = RequestResponseSnapshot(
                 statusCode: response.statusCode,
@@ -594,6 +603,9 @@ final class AppStore {
            let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             var headers: [String: String] = [:]
             for dict in params {
+                // 只使用启用的参数
+                let enabled = dict["enabled"] as? Bool ?? true
+                guard enabled else { continue }
                 if let name = dict["name"] as? String, !name.isEmpty,
                    let value = dict["value"] as? String {
                     headers[name] = value
@@ -616,6 +628,9 @@ final class AppStore {
         if let data = text.data(using: .utf8),
            let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             return try params.compactMap { dict -> URLQueryItem? in
+                // 只使用启用的参数
+                let enabled = dict["enabled"] as? Bool ?? true
+                guard enabled else { return nil }
                 guard let name = dict["name"] as? String, !name.isEmpty else { return nil }
                 let value = dict["value"] as? String ?? ""
                 return URLQueryItem(
