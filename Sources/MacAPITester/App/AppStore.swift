@@ -589,7 +589,21 @@ final class AppStore {
     }
 
     func parseHeaders(from text: String) throws -> [String: String] {
-        try parseKeyValueText(
+        // 尝试 JSON 格式
+        if let data = text.data(using: .utf8),
+           let params = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            var headers: [String: String] = [:]
+            for dict in params {
+                if let name = dict["name"] as? String, !name.isEmpty,
+                   let value = dict["value"] as? String {
+                    headers[name] = value
+                }
+            }
+            return headers
+        }
+
+        // 兼容旧格式 key=value
+        return try parseKeyValueText(
             text,
             section: "Headers",
             separators: [":", "="],
