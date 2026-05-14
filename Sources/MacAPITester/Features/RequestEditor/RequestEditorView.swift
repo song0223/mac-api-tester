@@ -656,9 +656,11 @@ struct RequestEditorView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .pointingHandCursor()
 
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.secondary)
+                .pointingHandCursor()
                 .onDrag(onDrag)
         }
     }
@@ -957,6 +959,7 @@ struct RequestEditorView: View {
 
         // 合并：保留已有描述，新的从 URL 来
         let existingMap = Dictionary(uniqueKeysWithValues: queryRows.filter { !$0.name.isEmpty }.map { ($0.name, $0) })
+        let urlParamKeys = Set(urlParams.map { $0.key })
         var merged: [QueryParamRow] = []
         for param in urlParams {
             if let existing = existingMap[param.key] {
@@ -971,6 +974,11 @@ struct RequestEditorView: View {
             } else {
                 merged.append(QueryParamRow(name: param.key, value: param.value))
             }
+        }
+
+        // 保留 queryRows 中存在但 URL 中不存在的行（如被禁用的行）
+        for row in queryRows where !row.name.isEmpty && !urlParamKeys.contains(row.name) {
+            merged.append(row)
         }
 
         if merged.isEmpty {
